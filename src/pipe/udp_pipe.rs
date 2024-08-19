@@ -624,7 +624,9 @@ mod tests {
                         close_pipe_line_count += 1;
                     }
                 }
-                Err(_) => {}
+                Err(_e) => {
+					_ = _e;
+				}
             }
         }
         assert_eq!(count, 12);
