@@ -1,12 +1,13 @@
 # rust-p2p
+
 NAT traversal for p2p communication, this is implemented in terms of a hole-punching technique.
 
 [![Crates.io](https://img.shields.io/crates/v/rust-p2p.svg)](https://crates.io/crates/rust-p2p)
 ![rust-p2p](https://docs.rs/rust-p2p/badge.svg)
 
-This crate provides a convenient way to create a pipe between multiple remote peers that may be behind Nats, these pipelines that are spawned from the pipe can be used to read/write bytes from/to a peer to another. 
+This crate provides a convenient way to create a pipe between multiple remote peers that may be behind Nats, these pipelines that are spawned from the pipe can be used to read/write bytes from/to a peer to another.
 
-The underlying transport protocols are `TCP`, `UDP` in the pipelines, users can even extend the protocol for the pipeline by using the powerful trait. 
+The underlying transport protocols are `TCP`, `UDP` in the pipelines, users can even extend the protocol for the pipeline by using the powerful trait.
 
 This crate is built on the async ecosystem tokio
 
@@ -17,12 +18,14 @@ It's a cross-platform crate
 # Usage
 
 Add this dependency to your `cargo.toml`
+
 ```toml
 rust-p2p = {version = "0.1"}
 ```
 
 # Example
-````rust
+
+```rust
 use rust_p2p::pipe::{pipe, PipeLine, PipeWriter,config::{PipeConfig, TcpPipeConfig, UdpPipeConfig}};
 use rust_p2p::nat::{NatInfo,NatType};
 #[tokio::main]
@@ -85,4 +88,4 @@ async fn main(){
 		});
 	}
 }
-````
+```
