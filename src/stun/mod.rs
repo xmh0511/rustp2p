@@ -9,6 +9,7 @@ use rand::RngCore;
 use stun_format::Attr;
 use tokio::net::UdpSocket;
 
+/// Obtain nat information with the option specified interface from the stun servers
 pub async fn stun_test_nat(
     stun_servers: Vec<String>,
     default_interface: Option<&LocalInterface>,
@@ -38,7 +39,7 @@ pub async fn stun_test_nat(
     Ok((nat_type, hash_set.into_iter().collect(), port_range))
 }
 
-pub async fn stun_test_nat0(
+pub(crate) async fn stun_test_nat0(
     stun_servers: Vec<String>,
     default_interface: Option<&LocalInterface>,
 ) -> anyhow::Result<(NatType, Vec<Ipv4Addr>, u16)> {
@@ -190,7 +191,8 @@ fn stun_addr(addr: stun_format::SocketAddr) -> SocketAddr {
 
 const TAG: u128 = 1827549368 << 64;
 
-pub fn send_stun_request() -> Vec<u8> {
+#[allow(dead_code)]
+pub(crate) fn send_stun_request() -> Vec<u8> {
     let mut buf = [0u8; 28];
     let mut msg = stun_format::MsgBuilder::from(buf.as_mut_slice());
     msg.typ(stun_format::MsgType::BindingRequest);
@@ -203,7 +205,8 @@ pub fn send_stun_request() -> Vec<u8> {
     msg.as_bytes().to_vec()
 }
 
-pub fn recv_stun_response(buf: &[u8]) -> Option<SocketAddr> {
+#[allow(dead_code)]
+pub(crate) fn recv_stun_response(buf: &[u8]) -> Option<SocketAddr> {
     let msg = stun_format::Msg::from(buf);
     if let Some(tid) = msg.tid() {
         if tid & TAG != TAG {

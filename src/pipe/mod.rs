@@ -32,7 +32,7 @@ pub type PipeComponent<PeerID, D, E> = (
     Puncher<PeerID, E>,
     IdleRouteManager<PeerID>,
 );
-
+/// Construct the needed components for p2p communication with the given pipe configuration
 pub fn pipe<PeerID: Hash + Eq + Clone, D, E>(
     config: PipeConfig<D, E>,
 ) -> anyhow::Result<PipeComponent<PeerID, D, E>> {
@@ -97,6 +97,7 @@ pub struct PipeWriterRef<'a, PeerID, E> {
 }
 
 impl<PeerID, D: Decoder, E: Encoder> Pipe<PeerID, D, E> {
+    /// Accept pipelines from a given `pipe`
     pub async fn accept(&mut self) -> anyhow::Result<PipeLine<D, E>> {
         tokio::select! {
             rs=accept_udp(self.udp_pipe.as_mut())=>{
@@ -144,10 +145,11 @@ impl<PeerID, D, E> Pipe<PeerID, D, E> {
     pub fn tcp_pipe_ref(&mut self) -> Option<&mut TcpPipe<D, E>> {
         self.tcp_pipe.as_mut()
     }
-
+    /// Acquire the `route_table` associated with the `pipe`
     pub fn route_table(&self) -> &RouteTable<PeerID> {
         &self.route_table
     }
+    /// Acquire a shared reference for writing to the `pipe`
     pub fn writer_ref(&self) -> PipeWriterRef<PeerID, E> {
         PipeWriterRef {
             route_table: &self.route_table,
@@ -167,30 +169,37 @@ impl<'a, PeerID, E> PipeWriterRef<'a, PeerID, E> {
             extensible_pipe_writer: self.extensible_pipe_writer.as_ref().map(|v| v.to_owned()),
         }
     }
+    /// Acquire a shared reference for writing to the pipe established by `TCP`
     pub fn tcp_pipe_writer_ref(&self) -> Option<TcpPipeWriterRef<'_, E>> {
         self.tcp_pipe_writer
     }
+    /// Acquire a shared reference for writing to the pipe established by `UDP`
     pub fn udp_pipe_writer_ref(&self) -> Option<UdpPipeWriterRef<'_>> {
         self.udp_pipe_writer
     }
+    /// Acquire a shared reference for writing to the pipe established by other extended protocols
     pub fn extensible_pipe_writer_ref(&self) -> Option<ExtensiblePipeWriterRef<'_>> {
         self.extensible_pipe_writer
     }
 }
 
 impl<PeerID, E> PipeWriter<PeerID, E> {
+    /// Acquire a owned `writer` for writing to the pipe established by `TCP`
     pub fn udp_pipe_writer(&self) -> Option<&UdpPipeWriter> {
         self.udp_pipe_writer.as_ref()
     }
+    /// Acquire a owned `writer` for writing to the pipe established by `UDP`
     pub fn tcp_pipe_writer(&self) -> Option<&TcpPipeWriter<E>> {
         self.tcp_pipe_writer.as_ref()
     }
+    /// Acquire a owned `writer` for writing to the pipe established by other extended protocols
     pub fn extensible_pipe_writer(&self) -> Option<&ExtensiblePipeWriter> {
         self.extensible_pipe_writer.as_ref()
     }
 }
 
 impl<PeerID, E: Encoder> PipeWriter<PeerID, E> {
+    /// Writing `buf` to the target denoted by `route_key`
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         match route_key.protocol() {
             ConnectProtocol::UDP => {
@@ -213,6 +222,7 @@ impl<PeerID, E: Encoder> PipeWriter<PeerID, E> {
         }
         Err(anyhow!("unimplemented"))
     }
+    /// Writing `buf` to the target denoted by SocketAddr with the specified protocol
     pub async fn send_to_addr<A: Into<SocketAddr>>(
         &self,
         connect_protocol: ConnectProtocol,
@@ -239,6 +249,7 @@ impl<PeerID, E: Encoder> PipeWriter<PeerID, E> {
 }
 
 impl<PeerID: Hash + Eq, E: Encoder> PipeWriter<PeerID, E> {
+    /// Writing `buf` to the target named by `peer_id`
     pub async fn send_to_id(&self, buf: &[u8], peer_id: &PeerID) -> anyhow::Result<usize> {
         let route = self.route_table.get_route_by_id(peer_id)?;
         self.send_to(buf, &route.route_key()).await
@@ -246,6 +257,9 @@ impl<PeerID: Hash + Eq, E: Encoder> PipeWriter<PeerID, E> {
 }
 
 impl<D: Decoder, E: Encoder> PipeLine<D, E> {
+    /// Receving buf from the associated PipeLine
+    /// `usize` in the `Ok` branch indicates how many bytes are received
+    /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
     pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
         match self {
             PipeLine::Udp(line) => line.recv_from(buf).await,
@@ -256,6 +270,7 @@ impl<D: Decoder, E: Encoder> PipeLine<D, E> {
 }
 
 impl<D, E> PipeLine<D, E> {
+    /// The protocol this pipeline is using
     pub fn protocol(&self) -> ConnectProtocol {
         match self {
             PipeLine::Udp(_) => ConnectProtocol::UDP,

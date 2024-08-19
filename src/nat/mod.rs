@@ -22,26 +22,27 @@ impl NatType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NatInfo {
-    // nat类型
+    /// nat type of the network
     pub nat_type: NatType,
-    // 公网IP集合
+    /// the set of public Ipv4
     pub public_ips: Vec<Ipv4Addr>,
-    // stun服务发现的端口
+    /// the set of public ports mapped from the nat
     pub public_ports: Vec<u16>,
-    // 映射的地址
+    /// the set of mapped addresses where `TCP` serves on
     pub mapping_tcp_addr: Vec<SocketAddr>,
+    /// the set of mapped addresses where `UDP` serves on
     pub mapping_udp_addr: Vec<SocketAddr>,
-    // 公网端口预测范围，对称网络打洞时有用
+    /// The predicted range of public ports, it is used when the nat_type is symmertric
     pub public_port_range: u16,
-    // 本地IP
+    /// local IP address
     pub local_ipv4: Ipv4Addr,
-    // 公网ipv6
+    /// The public IPv6 addess
     pub ipv6: Option<Ipv6Addr>,
-    // 本机监听的udp端口
+    /// The local ports where the `UDP` services bind
     pub local_udp_ports: Vec<u16>,
-    // 本机监听的tcp端口
+    /// The local ports where the `TCP` services bind
     pub local_tcp_port: u16,
-    // tcp映射出去的端口 nat1或者没有nat时有用
+    /// The public port of `TCP` service, which works when there is either `nat1` or no `nat` exists
     pub public_tcp_port: u16,
 }
 impl NatInfo {

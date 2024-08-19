@@ -27,6 +27,7 @@ pub struct TcpPipe<D, E> {
 }
 
 impl<D, E> TcpPipe<D, E> {
+    /// Construct a `TCP` pipe with the specified configuration
     pub fn new(config: TcpPipeConfig<D, E>) -> anyhow::Result<TcpPipe<D, E>> {
         config.check()?;
         let address: SocketAddr = if config.use_v6 {
@@ -68,6 +69,7 @@ impl<D, E> TcpPipe<D, E> {
 }
 
 impl<D: Decoder, E: Encoder> TcpPipe<D, E> {
+    /// Accept `TCP` pipelines from this kind pipe
     pub async fn accept(&mut self) -> anyhow::Result<TcpPipeLine<D, E>> {
         tokio::select! {
             rs=self.connect_receiver.recv()=>{
@@ -119,6 +121,7 @@ impl<D, E> TcpPipeLine<D, E> {
     pub fn route_key(&self) -> RouteKey {
         self.stream_owned.route_key
     }
+    /// Close this pipeline
     pub async fn shutdown(self) -> anyhow::Result<()> {
         let mut guard = self.tcp_write.lock().await;
         if let Some((write, _)) = guard.as_mut() {
@@ -142,6 +145,7 @@ impl<D, E> TcpPipeLine<D, E> {
     }
 }
 impl<D: Decoder, E: Encoder> TcpPipeLine<D, E> {
+    /// Writing `buf` to the target denoted by `route_key` via this pipeline
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         if &self.stream_owned.route_key != route_key {
             Err(anyhow!("mismatch"))?
@@ -154,7 +158,8 @@ impl<D: Decoder, E: Encoder> TcpPipeLine<D, E> {
             Err(anyhow!("miss"))
         }
     }
-    pub async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+
+    pub(crate) async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match tokio::time::timeout(
             self.route_idle_time,
             self.decoder.decode(&mut self.tcp_read, buf),
@@ -165,6 +170,9 @@ impl<D: Decoder, E: Encoder> TcpPipeLine<D, E> {
             Err(_) => Err(io::Error::from(io::ErrorKind::TimedOut)),
         }
     }
+    /// Receive bytes from this pipeline, which the configured Decoder pre-processes
+    /// `usize` in the `Ok` branch indicates how many bytes are received
+    /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
     pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
         let len = self.recv(buf).await?;
         Ok((len, self.route_key()))
@@ -218,7 +226,7 @@ impl<E> Clone for WriteHalfBox<E> {
 }
 
 impl<E> WriteHalfBox<E> {
-    pub fn new(write_half: OwnedWriteHalf, encoder: E) -> WriteHalfBox<E> {
+    pub(crate) fn new(write_half: OwnedWriteHalf, encoder: E) -> WriteHalfBox<E> {
         Self {
             write_half: Arc::new(Mutex::new(Some((write_half, encoder)))),
         }
@@ -397,6 +405,7 @@ impl<E: Encoder> TcpPipeWriter<E> {
         let route_key = self.connect(addr.into()).await?;
         self.send_to(buf, &route_key).await
     }
+    /// Writing `buf` to the target denoted by `route_key`
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         match route_key.index() {
             Index::Tcp(index) => {

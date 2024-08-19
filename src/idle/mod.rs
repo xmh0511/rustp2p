@@ -16,6 +16,7 @@ impl<PeerID: Hash + Eq + Clone> IdleRouteManager<PeerID> {
             route_table,
         }
     }
+    /// Take the timeout routes from the managed route_table
     pub async fn next_idle(&self) -> (PeerID, Route, Instant) {
         loop {
             let time = if let Some((peer_id, route, instant)) = self.route_table.oldest_route() {

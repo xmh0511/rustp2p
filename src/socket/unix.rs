@@ -22,7 +22,7 @@ impl VntSocketTrait for socket2::Socket {
         Ok(())
     }
 }
-
+/// Obtain the optimal interface with the specified IP address
 pub fn get_best_interface(dest_ip: Ipv4Addr) -> anyhow::Result<LocalInterface> {
     match get_interface(dest_ip) {
         Ok(iface) => return Ok(iface),
