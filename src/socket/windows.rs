@@ -39,6 +39,7 @@ impl VntSocketTrait for socket2::Socket {
     }
 }
 
+/// Obtain the optimal interface with the specified IP address
 pub fn get_best_interface(dest_ip: Ipv4Addr) -> anyhow::Result<LocalInterface> {
     // 获取最佳接口
     let index = unsafe {

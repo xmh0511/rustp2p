@@ -12,7 +12,7 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
-pub trait VntSocketTrait {
+pub(crate) trait VntSocketTrait {
     fn set_ip_unicast_if(&self, _interface: &LocalInterface) -> anyhow::Result<()> {
         Ok(())
     }
@@ -26,8 +26,8 @@ pub struct LocalInterface {
     #[allow(dead_code)]
     name: Option<String>,
 }
-
-pub async fn connect_tcp(
+#[allow(dead_code)]
+pub(crate) async fn connect_tcp(
     addr: SocketAddr,
     bind_port: u16,
     default_interface: Option<&LocalInterface>,
@@ -35,13 +35,14 @@ pub async fn connect_tcp(
     let socket = create_tcp0(addr.is_ipv4(), bind_port, default_interface)?;
     Ok(socket.connect(addr).await?)
 }
-pub fn create_tcp(
+#[allow(dead_code)]
+pub(crate) fn create_tcp(
     v4: bool,
     default_interface: Option<&LocalInterface>,
 ) -> anyhow::Result<tokio::net::TcpSocket> {
     create_tcp0(v4, 0, default_interface)
 }
-pub fn create_tcp0(
+pub(crate) fn create_tcp0(
     v4: bool,
     bind_port: u16,
     default_interface: Option<&LocalInterface>,
@@ -79,7 +80,7 @@ pub fn create_tcp0(
     socket.set_nodelay(true)?;
     Ok(tokio::net::TcpSocket::from_std_stream(socket.into()))
 }
-pub fn create_tcp_listener(addr: SocketAddr) -> anyhow::Result<std::net::TcpListener> {
+pub(crate) fn create_tcp_listener(addr: SocketAddr) -> anyhow::Result<std::net::TcpListener> {
     let socket = if addr.is_ipv6() {
         let socket = socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::STREAM, None)?;
         socket
@@ -102,7 +103,7 @@ pub fn create_tcp_listener(addr: SocketAddr) -> anyhow::Result<std::net::TcpList
     socket.set_nodelay(true)?;
     Ok(socket.into())
 }
-pub fn bind_udp_ops(
+pub(crate) fn bind_udp_ops(
     addr: SocketAddr,
     only_v6: bool,
     default_interface: Option<&LocalInterface>,
@@ -136,13 +137,14 @@ pub fn bind_udp_ops(
     socket.bind(&addr.into())?;
     Ok(socket)
 }
-pub fn bind_udp(
+pub(crate) fn bind_udp(
     addr: SocketAddr,
     default_interface: Option<&LocalInterface>,
 ) -> anyhow::Result<socket2::Socket> {
     bind_udp_ops(addr, true, default_interface).with_context(|| format!("bind_udp {}", addr))
 }
 
+/// Obtain network interface with the specified IP address
 pub fn get_interface(dest_ip: Ipv4Addr) -> anyhow::Result<LocalInterface> {
     let network_interfaces = NetworkInterface::show()?;
     for iface in network_interfaces {

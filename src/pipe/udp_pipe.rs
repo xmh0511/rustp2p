@@ -199,6 +199,7 @@ impl SocketLayer {
         Ok(())
     }
 
+    /// Acquire the underlying `UDP` socket by the index
     #[inline]
     fn get_sub_udp(&self, index: usize) -> anyhow::Result<Arc<UdpSocket>> {
         self.sub_udp
@@ -292,7 +293,7 @@ impl SocketLayer {
             }
         }
     }
-
+    /// Acquire the local ports `UDP` sockets bind on
     pub fn local_ports(&self) -> anyhow::Result<Vec<u16>> {
         let mut ports = Vec::with_capacity(self.v4_pipeline_len());
         for udp in &self.main_udp_v4 {
@@ -300,6 +301,7 @@ impl SocketLayer {
         }
         Ok(ports)
     }
+    /// Writing `buf` to the target denoted by `route_key`
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         let len = self
             .get_udp_from_route(route_key)?
@@ -307,13 +309,14 @@ impl SocketLayer {
             .await?;
         Ok(len)
     }
-
+    /// Try to write `buf` to the target denoted by `route_key`
     pub fn try_send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         let len = self
             .get_udp_from_route(route_key)?
             .try_send_to(buf, route_key.addr())?;
         Ok(len)
     }
+    /// Writing `buf` to the target denoted by SocketAddr
     pub async fn send_to_addr<A: Into<SocketAddr>>(
         &self,
         buf: &[u8],
@@ -321,6 +324,7 @@ impl SocketLayer {
     ) -> anyhow::Result<usize> {
         self.send_to_addr_via_index(buf, addr.into(), 0).await
     }
+    /// Try to write `buf` to the target denoted by SocketAddr
     pub fn try_send_to_addr<A: Into<SocketAddr>>(
         &self,
         buf: &[u8],
@@ -328,6 +332,7 @@ impl SocketLayer {
     ) -> anyhow::Result<usize> {
         self.try_send_to_addr_via_index(buf, addr.into(), 0)
     }
+    /// Acquire the PipeWriter by the index
     pub fn get(&self, addr: SocketAddr, index: usize) -> anyhow::Result<UdpPipeWriterIndex<'_>> {
         if index >= self.main_udp_v4.len() && index >= self.main_udp_v6.len() {
             return Err(anyhow!(
@@ -341,6 +346,7 @@ impl SocketLayer {
         })
     }
 
+    /// Send bytes to the target denoted by SocketAddr with every main underlying socket
     pub async fn detect_pub_addrs<A: Into<SocketAddr>>(
         &self,
         buf: &[u8],
@@ -374,28 +380,33 @@ impl UdpPipe {
     }
 }
 impl UdpPipe {
+    /// Construct a `UDP` pipe with the specified configuration
     pub fn new(config: UdpPipeConfig) -> anyhow::Result<UdpPipe> {
         udp_pipe(config)
     }
+    /// Accept `UDP` pipelines from this kind pipe
     pub async fn accept(&mut self) -> anyhow::Result<UdpPipeLine> {
         self.pipe_line_receiver
             .recv()
             .await
             .context("UdpPipe close")
     }
-
+    /// The number of pipelines established by main `UDP` sockets(IPv4)
     #[inline]
     pub fn main_pipeline_len(&self) -> usize {
         self.socket_layer.main_pipeline_len()
     }
+    /// The number of pipelines established by main `UDP` sockets(IPv4)
     #[inline]
     pub fn v4_pipeline_len(&self) -> usize {
         self.socket_layer.v4_pipeline_len()
     }
+    /// The number of pipelines established by main `UDP` sockets(IPv6)
     #[inline]
     pub fn v6_pipeline_len(&self) -> usize {
         self.socket_layer.v6_pipeline_len()
     }
+    /// Acquire a shared reference for writing to the pipe
     pub fn writer_ref(&self) -> UdpPipeWriterRef<'_> {
         UdpPipeWriterRef {
             socket_layer: &self.socket_layer,
@@ -486,6 +497,7 @@ impl UdpPipeLine {
     }
 }
 impl UdpPipeLine {
+    /// Writing `buf` to the target denoted by SocketAddr via this pipeline
     pub async fn send_to_addr<A: Into<SocketAddr>>(
         &self,
         buf: &[u8],
@@ -498,6 +510,7 @@ impl UdpPipeLine {
             Err(anyhow!("closed"))
         }
     }
+    /// Try to write `buf` to the target denoted by SocketAddr via this pipeline
     pub fn try_send_to_addr<A: Into<SocketAddr>>(&self, buf: &[u8], addr: A) -> anyhow::Result<()> {
         if let Some(udp) = &self.udp {
             udp.try_send_to(buf, addr.into())?;
@@ -506,6 +519,7 @@ impl UdpPipeLine {
             Err(anyhow!("closed"))
         }
     }
+    /// Writing `buf` to the target denoted by `route_key` via this pipeline
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<()> {
         if self.index != route_key.index() {
             Err(anyhow!("mismatch"))?
@@ -525,6 +539,9 @@ impl UdpPipeLine {
             Err(anyhow!("closed"))
         }
     }
+    /// Receving buf from this PipeLine
+    /// `usize` in the `Ok` branch indicates how many bytes are received
+    /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
     pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
         let udp = if let Some(udp) = &self.udp {
             udp
