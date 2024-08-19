@@ -197,12 +197,12 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
             self.reset_record(id);
             return false;
         }
-        let count = self
+        let count = *self
             .count_record
             .lock()
-            .get(id)
-            .cloned()
-            .unwrap_or_default();
+            .entry(id.clone())
+            .and_modify(|v| *v += 1)
+            .or_insert(0);
         if count > 8 {
             //降低频率
             let interval = count / 8;
@@ -229,12 +229,12 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
         buf: &[u8],
         punch_info: PunchInfo,
     ) -> anyhow::Result<()> {
-        let count = *self
+        let count = self
             .count_record
             .lock()
-            .entry(peer_id.clone())
-            .and_modify(|v| *v += 1)
-            .or_insert(0);
+            .get(&peer_id)
+            .cloned()
+            .unwrap_or_default();
         let peer_nat_info = punch_info.peer_nat_info;
         let punch_model = punch_info.punch_model;
         async_scoped::TokioScope::scope_and_block(|s| {
@@ -375,7 +375,12 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                     )
                     .await?;
                 }
-                let start = *self.sym_record.lock().entry(peer_id.clone()).or_insert(0);
+                let start = self
+                    .sym_record
+                    .lock()
+                    .get(&peer_id)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut end = start + max_k2;
                 if end > self.port_vec.len() {
                     end = self.port_vec.len();
