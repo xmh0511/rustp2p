@@ -1,11 +1,9 @@
-use std::time::Duration;
-
 use bytes::{BufMut, BytesMut};
 use env_logger::Env;
 
 use rust_p2p::pipe::config::{PipeConfig, TcpPipeConfig, UdpPipeConfig};
-use rust_p2p::pipe::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::pipe::tcp_pipe::LengthPrefixedCodec;
+use rust_p2p::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::route::route_table::RouteTable;
 
 /*Demo Protocol

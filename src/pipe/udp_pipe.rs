@@ -11,9 +11,10 @@ use anyhow::{anyhow, Context};
 use parking_lot::{Mutex, RwLock};
 use tokio::net::UdpSocket;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum Model {
     High,
+    #[default]
     Low,
 }
 impl Model {
@@ -22,11 +23,6 @@ impl Model {
     }
     pub fn is_high(&self) -> bool {
         self == &Model::High
-    }
-}
-impl Default for Model {
-    fn default() -> Self {
-        Model::Low
     }
 }
 
@@ -578,6 +574,7 @@ fn should_ignore_error(e: &std::io::Error) -> bool {
             return os_error == windows_sys::Win32::Networking::WinSock::WSAECONNRESET;
         }
     }
+    _ = e;
     false
 }
 

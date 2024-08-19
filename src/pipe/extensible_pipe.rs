@@ -60,6 +60,11 @@ impl ExtensiblePipe {
         }
     }
 }
+impl Default for ExtensiblePipe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ExtensiblePipe {
     pub async fn accept(&mut self) -> anyhow::Result<ExtensiblePipeLine> {

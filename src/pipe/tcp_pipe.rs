@@ -72,7 +72,7 @@ impl<D: Decoder, E: Encoder> TcpPipe<D, E> {
         tokio::select! {
             rs=self.connect_receiver.recv()=>{
                 let (route_key,read_half,write_half) = rs.context("connect_receiver done")?;
-                return Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()));
+                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()))
             }
             rs=self.tcp_listener.accept()=>{
                 let (tcp_stream,_addr) = rs?;
@@ -80,7 +80,7 @@ impl<D: Decoder, E: Encoder> TcpPipe<D, E> {
                 let (read_half,write_half) = tcp_stream.into_split();
                 let write_half = WriteHalfBox::new(write_half,self.tcp_pipe_writer.encoder.clone());
                 self.write_half_collect.add_write_half(route_key,0, write_half.clone());
-                return Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()));
+                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()))
             }
         }
     }
@@ -261,7 +261,7 @@ impl<E> WriteHalfCollect<E> {
 
     pub(crate) fn get_one_route_key(&self, addr: &SocketAddr) -> Option<RouteKey> {
         if let Some(v) = self.addr_mapping.get(addr) {
-            if let Some(index_usize) = v.get(0) {
+            if let Some(index_usize) = v.first() {
                 return Some(RouteKey::new(Index::Tcp(*index_usize), *addr));
             }
         }

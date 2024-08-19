@@ -24,8 +24,8 @@ use parking_lot::Mutex;
 
 use rust_p2p::nat::NatInfo;
 use rust_p2p::pipe::config::{PipeConfig, TcpPipeConfig, UdpPipeConfig};
-use rust_p2p::pipe::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::pipe::tcp_pipe::{Decoder, Encoder, LengthPrefixedCodec};
+use rust_p2p::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::punch::{PunchInfo, PunchModelBoxes, Puncher};
 use rust_p2p::route::route_table::RouteTable;
 use rust_p2p::route::ConnectProtocol;
@@ -170,6 +170,7 @@ struct ContextHandler {
     puncher: Puncher<u32, LengthPrefixedCodec>,
     nat_info: Arc<Mutex<NatInfo>>,
     route_table: RouteTable<u32>,
+    #[allow(dead_code)]
     server: SocketAddr,
     pipe_writer: PipeWriter<u32, LengthPrefixedCodec>,
 }

@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::nat::{NatInfo, NatType};
-use crate::pipe::pipe::Pipe;
 use crate::pipe::tcp_pipe::{BytesCodec, Encoder, TcpPipeWriter};
 use crate::pipe::udp_pipe::UdpPipeWriter;
+use crate::pipe::Pipe;
 use crate::route::route_table::RouteTable;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -229,13 +229,12 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
         buf: &[u8],
         punch_info: PunchInfo,
     ) -> anyhow::Result<()> {
-        let count = self
+        let count = *self
             .count_record
             .lock()
             .entry(peer_id.clone())
             .and_modify(|v| *v += 1)
-            .or_insert(0)
-            .clone();
+            .or_insert(0);
         let peer_nat_info = punch_info.peer_nat_info;
         let punch_model = punch_info.punch_model;
         async_scoped::TokioScope::scope_and_block(|s| {
@@ -306,7 +305,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                 .mapping_udp_addr
                 .iter()
                 .filter(|a| a.is_ipv4())
-                .map(|a| *a)
+                .copied()
                 .collect();
             udp_pipe_writer.try_main_send_to_addr(buf, &mapping_udp_v4_addr);
 
@@ -314,7 +313,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                 .mapping_udp_addr
                 .iter()
                 .filter(|a| a.is_ipv6())
-                .map(|a| *a)
+                .copied()
                 .collect();
             udp_pipe_writer.try_main_send_to_addr(buf, &mapping_udp_v6_addr);
         }
@@ -349,7 +348,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                     //递减探测规模
                     max_k2 = max_k2.mul(8).div(count).max(max_k1 as usize);
                 }
-                let port = peer_nat_info.public_ports.get(0).map(|e| *e).unwrap_or(0);
+                let port = peer_nat_info.public_ports.first().copied().unwrap_or(0);
                 if peer_nat_info.public_port_range < max_k1 * 3 {
                     //端口变化不大时，在预测的范围内随机发送
                     let min_port = if port > peer_nat_info.public_port_range {
@@ -368,7 +367,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                     let mut nums: Vec<u16> = (min_port..=max_port).collect();
                     nums.shuffle(&mut rand::thread_rng());
                     self.punch_symmetric(
-                        &udp_pipe_writer,
+                        udp_pipe_writer,
                         &nums[..k],
                         buf,
                         &peer_nat_info.public_ips,
@@ -384,7 +383,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                 let mut index = start
                     + self
                         .punch_symmetric(
-                            &udp_pipe_writer,
+                            udp_pipe_writer,
                             &self.port_vec[start..end],
                             buf,
                             &peer_nat_info.public_ips,
@@ -424,7 +423,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
                 if count == max {
                     return Ok(index);
                 }
-                let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(*pub_ip, *port)).into();
+                let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(*pub_ip, *port));
                 if let Err(e) = udp_pipe_writer.try_send_to_addr(buf, addr) {
                     log::info!("{addr},{e:?}");
                 }

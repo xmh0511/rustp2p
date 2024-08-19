@@ -86,8 +86,7 @@ pub fn create_tcp_listener(addr: SocketAddr) -> anyhow::Result<std::net::TcpList
             .with_context(|| format!("set_only_v6 failed: {}", &addr))?;
         socket
     } else {
-        let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
-        socket
+        socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?
     };
     socket
         .set_reuse_address(true)

@@ -88,13 +88,13 @@ async fn test_nat(udp: &UdpSocket, stun_server: &String) -> io::Result<HashSet<S
     udp.connect(stun_server).await?;
     let tid = rand::thread_rng().next_u64() as u128;
     let mut addr = HashSet::new();
-    let (mapped_addr1, changed_addr1) = test_nat_(&udp, stun_server, true, true, tid).await?;
+    let (mapped_addr1, changed_addr1) = test_nat_(udp, stun_server, true, true, tid).await?;
     if mapped_addr1.is_ipv4() {
         addr.insert(mapped_addr1);
     }
     if let Some(changed_addr1) = changed_addr1 {
         if udp.connect(changed_addr1).await.is_ok() {
-            match test_nat_(&udp, stun_server, false, false, tid + 1).await {
+            match test_nat_(udp, stun_server, false, false, tid + 1).await {
                 Ok((mapped_addr2, _)) => {
                     if mapped_addr2.is_ipv4() {
                         addr.insert(mapped_addr1);
@@ -164,8 +164,10 @@ async fn test_nat_(
                 }
                 _ => {}
             }
-            if changed_addr.is_some() && mapped_addr.is_some() {
-                return Ok((mapped_addr.unwrap(), changed_addr));
+            if let Some(mapped_addr) = mapped_addr {
+                if changed_addr.is_some() {
+                    return Ok((mapped_addr, changed_addr));
+                }
             }
         }
         if let Some(addr) = mapped_addr {
