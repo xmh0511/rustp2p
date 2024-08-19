@@ -2,16 +2,13 @@ use crate::extend::addr::is_ipv6_global;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum NatType {
+    #[default]
     Cone,
     Symmetric,
 }
-impl Default for NatType {
-    fn default() -> Self {
-        NatType::Cone
-    }
-}
+
 impl NatType {
     #[inline]
     pub fn is_cone(&self) -> bool {
@@ -61,11 +58,8 @@ impl NatInfo {
         vec![]
     }
     pub fn ipv6_tcp_addr(&self) -> Option<SocketAddr> {
-        if let Some(ipv6) = self.ipv6 {
-            Some(SocketAddrV6::new(ipv6, self.local_tcp_port, 0, 0).into())
-        } else {
-            None
-        }
+        self.ipv6
+            .map(|ipv6| SocketAddrV6::new(ipv6, self.local_tcp_port, 0, 0).into())
     }
     pub fn public_ipv4_addr(&self) -> Vec<SocketAddr> {
         if self.public_ips.is_empty() || self.public_ports.is_empty() {

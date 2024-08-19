@@ -10,9 +10,10 @@ use parking_lot::RwLock;
 
 use crate::route::{Route, RouteKey, DEFAULT_RT};
 
+pub(crate) type RouteTableInner<PeerID> =
+    Arc<RwLock<HashMap<PeerID, (AtomicUsize, Vec<(Route, AtomicCell<Instant>)>)>>>;
 pub struct RouteTable<PeerID> {
-    pub(crate) route_table:
-        Arc<RwLock<HashMap<PeerID, (AtomicUsize, Vec<(Route, AtomicCell<Instant>)>)>>>,
+    pub(crate) route_table: RouteTableInner<PeerID>,
     first_latency: bool,
     channel_num: usize,
 }
@@ -104,16 +105,14 @@ impl<PeerID: Hash + Eq + Clone> RouteTable<PeerID> {
         if exist {
             list.sort_by_key(|(k, _)| k.rt);
         } else {
-            if !self.first_latency {
-                if route.is_p2p() {
-                    //非优先延迟的情况下 添加了直连的则排除非直连的
-                    list.retain(|(k, _)| k.is_p2p());
-                }
+            if !self.first_latency && route.is_p2p() {
+                //非优先延迟的情况下 添加了直连的则排除非直连的
+                list.retain(|(k, _)| k.is_p2p());
             };
             list.sort_by_key(|(k, _)| k.rt);
             list.push((route, AtomicCell::new(Instant::now())));
         }
-        return true;
+        true
     }
 
     pub fn route(&self, id: &PeerID) -> Option<Vec<Route>> {
@@ -180,7 +179,7 @@ impl<PeerID: Hash + Eq + Clone> RouteTable<PeerID> {
         let table = self.route_table.read();
         table
             .iter()
-            .map(|(k, (_, v))| (k.clone(), v.iter().map(|(i, _)| i.clone()).collect()))
+            .map(|(k, (_, v))| (k.clone(), v.iter().map(|(i, _)| *i).collect()))
             .collect()
     }
     /// Return all P2P routes

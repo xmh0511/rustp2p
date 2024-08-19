@@ -43,7 +43,7 @@ pub fn get_best_interface(dest_ip: Ipv4Addr) -> anyhow::Result<LocalInterface> {
     // 获取最佳接口
     let index = unsafe {
         let mut dest: SOCKADDR_IN = std::mem::zeroed();
-        dest.sin_family = AF_INET as u16;
+        dest.sin_family = AF_INET;
         dest.sin_addr.S_un.S_addr = u32::from_ne_bytes(dest_ip.octets());
 
         let mut index: u32 = 0;
