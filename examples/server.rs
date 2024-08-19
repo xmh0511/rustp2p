@@ -95,7 +95,7 @@ async fn handler(
                         &peer_ids
                             .iter()
                             .filter(|k| **k != peer_id)
-                            .map(|k| *k)
+                            .copied()
                             .collect::<Vec<u32>>(),
                     )
                     .unwrap();

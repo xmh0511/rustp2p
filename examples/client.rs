@@ -63,7 +63,6 @@ async fn main() {
         tcp,
     } = Args::parse();
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    let tcp = tcp;
     let connect_protocol = if tcp {
         ConnectProtocol::TCP
     } else {
