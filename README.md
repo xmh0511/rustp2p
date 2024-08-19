@@ -1,5 +1,5 @@
 # rust-p2p
-NAT traversal for p2p communication, which is implemented by hole-punching.
+NAT traversal for p2p communication, this is implemented in terms of a hole-punching technique.
 
 [![Crates.io](https://img.shields.io/crates/v/rust-p2p.svg)](https://crates.io/crates/rust-p2p)
 ![rust-p2p](https://docs.rs/rust-p2p/badge.svg)
