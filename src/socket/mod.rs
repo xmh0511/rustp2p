@@ -20,7 +20,7 @@ pub trait VntSocketTrait {
 
 #[derive(Clone, Debug, Default)]
 pub struct LocalInterface {
-	#[allow(dead_code)]
+    #[allow(dead_code)]
     index: u32,
     #[cfg(unix)]
     #[allow(dead_code)]

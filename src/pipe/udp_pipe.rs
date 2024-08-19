@@ -625,8 +625,8 @@ mod tests {
                     }
                 }
                 Err(_e) => {
-					_ = _e;
-				}
+                    _ = _e;
+                }
             }
         }
         assert_eq!(count, 12);
