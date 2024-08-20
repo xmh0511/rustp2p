@@ -2,7 +2,7 @@ use bytes::{BufMut, BytesMut};
 use env_logger::Env;
 
 use rust_p2p::pipe::config::{PipeConfig, TcpPipeConfig, UdpPipeConfig};
-use rust_p2p::pipe::tcp_pipe::LengthPrefixedCodec;
+use rust_p2p::pipe::tcp_pipe::LengthPrefixedInitCodec;
 use rust_p2p::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::route::route_table::RouteTable;
 
@@ -36,14 +36,12 @@ pub const MY_SERVER_ID: u32 = 0;
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let udp_config = UdpPipeConfig::default().set_simple_udp_port(3000);
-    let tcp_config =
-        TcpPipeConfig::new(LengthPrefixedCodec, LengthPrefixedCodec).set_tcp_port(3000);
+    let tcp_config = TcpPipeConfig::new(Box::new(LengthPrefixedInitCodec)).set_tcp_port(3000);
     let config = PipeConfig::empty()
         .set_main_pipeline_num(1)
         .set_tcp_pipe_config(tcp_config)
         .set_udp_pipe_config(udp_config);
-    let (mut pipe, _puncher, _idle_route_manager) =
-        pipe::<u32, LengthPrefixedCodec, LengthPrefixedCodec>(config).unwrap();
+    let (mut pipe, _puncher, _idle_route_manager) = pipe::<u32>(config).unwrap();
     let writer = pipe.writer_ref().to_owned();
     log::info!("listen 3000");
     loop {
@@ -55,11 +53,7 @@ async fn main() {
         });
     }
 }
-async fn handler(
-    route_table: RouteTable<u32>,
-    mut line: PipeLine<LengthPrefixedCodec, LengthPrefixedCodec>,
-    writer: PipeWriter<u32, LengthPrefixedCodec>,
-) {
+async fn handler(route_table: RouteTable<u32>, mut line: PipeLine, writer: PipeWriter<u32>) {
     let mut buf = [0; 65536];
     loop {
         let (len, route_key) = match line.recv_from(&mut buf).await {

@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 
 use rust_p2p::nat::NatInfo;
 use rust_p2p::pipe::config::{PipeConfig, TcpPipeConfig, UdpPipeConfig};
-use rust_p2p::pipe::tcp_pipe::{Decoder, Encoder, LengthPrefixedCodec};
+use rust_p2p::pipe::tcp_pipe::LengthPrefixedInitCodec;
 use rust_p2p::pipe::{pipe, PipeLine, PipeWriter};
 use rust_p2p::punch::{PunchInfo, PunchModelBoxes, Puncher};
 use rust_p2p::route::route_table::RouteTable;
@@ -69,7 +69,7 @@ async fn main() {
     };
     log::info!("my_id:{my_id},server:{server}");
     let udp_config = UdpPipeConfig::default();
-    let tcp_config = TcpPipeConfig::new(LengthPrefixedCodec, LengthPrefixedCodec);
+    let tcp_config = TcpPipeConfig::new(Box::new(LengthPrefixedInitCodec));
     let config = PipeConfig::empty()
         .set_udp_pipe_config(udp_config)
         .set_tcp_pipe_config(tcp_config)
@@ -167,19 +167,16 @@ async fn main() {
 struct ContextHandler {
     my_id: u32,
     peer_list: Arc<Mutex<Vec<u32>>>,
-    puncher: Puncher<u32, LengthPrefixedCodec>,
+    puncher: Puncher<u32>,
     nat_info: Arc<Mutex<NatInfo>>,
     route_table: RouteTable<u32>,
     #[allow(dead_code)]
     server: SocketAddr,
-    pipe_writer: PipeWriter<u32, LengthPrefixedCodec>,
+    pipe_writer: PipeWriter<u32>,
 }
 
 impl ContextHandler {
-    async fn handle<D: Decoder, E: Encoder>(
-        &self,
-        mut pipe_line: PipeLine<D, E>,
-    ) -> anyhow::Result<()> {
+    async fn handle(&self, mut pipe_line: PipeLine) -> anyhow::Result<()> {
         let mut buf = [0; 65536];
         loop {
             let (len, route_key) = match pipe_line.recv_from(&mut buf).await {
@@ -307,7 +304,7 @@ impl ContextHandler {
     }
 }
 
-async fn my_nat_info(pipe_writer: &PipeWriter<u32, LengthPrefixedCodec>) -> Arc<Mutex<NatInfo>> {
+async fn my_nat_info(pipe_writer: &PipeWriter<u32>) -> Arc<Mutex<NatInfo>> {
     let stun_server = vec![
         "stun.miwifi.com:3478".to_string(),
         "stun.chat.bilibili.com:3478".to_string(),

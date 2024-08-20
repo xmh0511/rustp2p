@@ -1,4 +1,21 @@
+use std::hash::Hash;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+
+use anyhow::anyhow;
+
+use tcp_pipe::TcpPipeWriterRef;
+
+use crate::error::RecvError;
+use crate::idle::IdleRouteManager;
+use crate::pipe::config::PipeConfig;
+use crate::pipe::extensible_pipe::{
+    ExtensiblePipe, ExtensiblePipeLine, ExtensiblePipeWriter, ExtensiblePipeWriterRef,
+};
+use crate::pipe::tcp_pipe::{TcpPipe, TcpPipeLine, TcpPipeWriter};
+use crate::pipe::udp_pipe::{UdpPipe, UdpPipeLine, UdpPipeWriter, UdpPipeWriterRef};
+use crate::punch::Puncher;
+use crate::route::route_table::RouteTable;
+use crate::route::{ConnectProtocol, RouteKey};
 
 pub mod config;
 pub mod extensible_pipe;
@@ -9,33 +26,11 @@ pub const DEFAULT_ADDRESS_V4: SocketAddr =
 pub const DEFAULT_ADDRESS_V6: SocketAddr =
     SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
 
-use std::hash::Hash;
-
-use anyhow::anyhow;
-
-use crate::error::RecvError;
-use crate::idle::IdleRouteManager;
-use crate::pipe::config::PipeConfig;
-use crate::pipe::extensible_pipe::{
-    ExtensiblePipe, ExtensiblePipeLine, ExtensiblePipeWriter, ExtensiblePipeWriterRef,
-};
-use crate::pipe::tcp_pipe::{Decoder, Encoder, TcpPipe, TcpPipeLine, TcpPipeWriter};
-use crate::pipe::udp_pipe::{UdpPipe, UdpPipeLine, UdpPipeWriter, UdpPipeWriterRef};
-use crate::punch::Puncher;
-use crate::route::route_table::RouteTable;
-use crate::route::{ConnectProtocol, RouteKey};
-
-use tcp_pipe::TcpPipeWriterRef;
-
-pub type PipeComponent<PeerID, D, E> = (
-    Pipe<PeerID, D, E>,
-    Puncher<PeerID, E>,
-    IdleRouteManager<PeerID>,
-);
+pub type PipeComponent<PeerID> = (Pipe<PeerID>, Puncher<PeerID>, IdleRouteManager<PeerID>);
 /// Construct the needed components for p2p communication with the given pipe configuration
-pub fn pipe<PeerID: Hash + Eq + Clone, D, E>(
-    config: PipeConfig<D, E>,
-) -> anyhow::Result<PipeComponent<PeerID, D, E>> {
+pub fn pipe<PeerID: Hash + Eq + Clone>(
+    config: PipeConfig,
+) -> anyhow::Result<PipeComponent<PeerID>> {
     let route_table = RouteTable::new(config.first_latency, config.multi_pipeline);
     let udp_pipe = if let Some(mut udp_pipe_config) = config.udp_pipe_config {
         udp_pipe_config.main_pipeline_num = config.multi_pipeline;
@@ -68,37 +63,37 @@ pub fn pipe<PeerID: Hash + Eq + Clone, D, E>(
     ))
 }
 
-pub struct Pipe<PeerID, D, E> {
+pub struct Pipe<PeerID> {
     route_table: RouteTable<PeerID>,
     udp_pipe: Option<UdpPipe>,
-    tcp_pipe: Option<TcpPipe<D, E>>,
+    tcp_pipe: Option<TcpPipe>,
     extensible_pipe: Option<ExtensiblePipe>,
 }
 
-pub enum PipeLine<D, E> {
+pub enum PipeLine {
     Udp(UdpPipeLine),
-    Tcp(TcpPipeLine<D, E>),
+    Tcp(TcpPipeLine),
     Extend(ExtensiblePipeLine),
 }
 
 #[derive(Clone)]
-pub struct PipeWriter<PeerID, E> {
+pub struct PipeWriter<PeerID> {
     route_table: RouteTable<PeerID>,
     udp_pipe_writer: Option<UdpPipeWriter>,
-    tcp_pipe_writer: Option<TcpPipeWriter<E>>,
+    tcp_pipe_writer: Option<TcpPipeWriter>,
     extensible_pipe_writer: Option<ExtensiblePipeWriter>,
 }
 
-pub struct PipeWriterRef<'a, PeerID, E> {
+pub struct PipeWriterRef<'a, PeerID> {
     route_table: &'a RouteTable<PeerID>,
     udp_pipe_writer: Option<UdpPipeWriterRef<'a>>,
-    tcp_pipe_writer: Option<TcpPipeWriterRef<'a, E>>,
+    tcp_pipe_writer: Option<TcpPipeWriterRef<'a>>,
     extensible_pipe_writer: Option<ExtensiblePipeWriterRef<'a>>,
 }
 
-impl<PeerID, D: Decoder, E: Encoder> Pipe<PeerID, D, E> {
+impl<PeerID> Pipe<PeerID> {
     /// Accept pipelines from a given `pipe`
-    pub async fn accept(&mut self) -> anyhow::Result<PipeLine<D, E>> {
+    pub async fn accept(&mut self) -> anyhow::Result<PipeLine> {
         tokio::select! {
             rs=accept_udp(self.udp_pipe.as_mut())=>{
                  rs
@@ -112,25 +107,21 @@ impl<PeerID, D: Decoder, E: Encoder> Pipe<PeerID, D, E> {
         }
     }
 }
-async fn accept_tcp<D: Decoder, E: Encoder>(
-    tcp: Option<&mut TcpPipe<D, E>>,
-) -> anyhow::Result<PipeLine<D, E>> {
+async fn accept_tcp(tcp: Option<&mut TcpPipe>) -> anyhow::Result<PipeLine> {
     if let Some(tcp_pipe) = tcp {
         Ok(PipeLine::Tcp(tcp_pipe.accept().await?))
     } else {
         futures::future::pending().await
     }
 }
-async fn accept_udp<D, E>(udp: Option<&mut UdpPipe>) -> anyhow::Result<PipeLine<D, E>> {
+async fn accept_udp(udp: Option<&mut UdpPipe>) -> anyhow::Result<PipeLine> {
     if let Some(udp_pipe) = udp {
         Ok(PipeLine::Udp(udp_pipe.accept().await?))
     } else {
         futures::future::pending().await
     }
 }
-async fn accept_extend<D, E>(
-    extend: Option<&mut ExtensiblePipe>,
-) -> anyhow::Result<PipeLine<D, E>> {
+async fn accept_extend(extend: Option<&mut ExtensiblePipe>) -> anyhow::Result<PipeLine> {
     if let Some(extend) = extend {
         Ok(PipeLine::Extend(extend.accept().await?))
     } else {
@@ -138,11 +129,11 @@ async fn accept_extend<D, E>(
     }
 }
 
-impl<PeerID, D, E> Pipe<PeerID, D, E> {
+impl<PeerID> Pipe<PeerID> {
     pub fn udp_pipe_ref(&mut self) -> Option<&mut UdpPipe> {
         self.udp_pipe.as_mut()
     }
-    pub fn tcp_pipe_ref(&mut self) -> Option<&mut TcpPipe<D, E>> {
+    pub fn tcp_pipe_ref(&mut self) -> Option<&mut TcpPipe> {
         self.tcp_pipe.as_mut()
     }
     /// Acquire the `route_table` associated with the `pipe`
@@ -150,7 +141,7 @@ impl<PeerID, D, E> Pipe<PeerID, D, E> {
         &self.route_table
     }
     /// Acquire a shared reference for writing to the `pipe`
-    pub fn writer_ref(&self) -> PipeWriterRef<PeerID, E> {
+    pub fn writer_ref(&self) -> PipeWriterRef<PeerID> {
         PipeWriterRef {
             route_table: &self.route_table,
             udp_pipe_writer: self.udp_pipe.as_ref().map(|v| v.writer_ref()),
@@ -160,8 +151,8 @@ impl<PeerID, D, E> Pipe<PeerID, D, E> {
     }
 }
 
-impl<'a, PeerID, E> PipeWriterRef<'a, PeerID, E> {
-    pub fn to_owned(&self) -> PipeWriter<PeerID, E> {
+impl<'a, PeerID> PipeWriterRef<'a, PeerID> {
+    pub fn to_owned(&self) -> PipeWriter<PeerID> {
         PipeWriter {
             route_table: self.route_table.clone(),
             udp_pipe_writer: self.udp_pipe_writer.as_ref().map(|v| v.to_owned()),
@@ -170,7 +161,7 @@ impl<'a, PeerID, E> PipeWriterRef<'a, PeerID, E> {
         }
     }
     /// Acquire a shared reference for writing to the pipe established by `TCP`
-    pub fn tcp_pipe_writer_ref(&self) -> Option<TcpPipeWriterRef<'_, E>> {
+    pub fn tcp_pipe_writer_ref(&self) -> Option<TcpPipeWriterRef<'_>> {
         self.tcp_pipe_writer
     }
     /// Acquire a shared reference for writing to the pipe established by `UDP`
@@ -183,13 +174,13 @@ impl<'a, PeerID, E> PipeWriterRef<'a, PeerID, E> {
     }
 }
 
-impl<PeerID, E> PipeWriter<PeerID, E> {
+impl<PeerID> PipeWriter<PeerID> {
     /// Acquire a owned `writer` for writing to the pipe established by `TCP`
     pub fn udp_pipe_writer(&self) -> Option<&UdpPipeWriter> {
         self.udp_pipe_writer.as_ref()
     }
     /// Acquire a owned `writer` for writing to the pipe established by `UDP`
-    pub fn tcp_pipe_writer(&self) -> Option<&TcpPipeWriter<E>> {
+    pub fn tcp_pipe_writer(&self) -> Option<&TcpPipeWriter> {
         self.tcp_pipe_writer.as_ref()
     }
     /// Acquire a owned `writer` for writing to the pipe established by other extended protocols
@@ -198,7 +189,7 @@ impl<PeerID, E> PipeWriter<PeerID, E> {
     }
 }
 
-impl<PeerID, E: Encoder> PipeWriter<PeerID, E> {
+impl<PeerID> PipeWriter<PeerID> {
     /// Writing `buf` to the target denoted by `route_key`
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         match route_key.protocol() {
@@ -248,7 +239,7 @@ impl<PeerID, E: Encoder> PipeWriter<PeerID, E> {
     }
 }
 
-impl<PeerID: Hash + Eq, E: Encoder> PipeWriter<PeerID, E> {
+impl<PeerID: Hash + Eq> PipeWriter<PeerID> {
     /// Writing `buf` to the target named by `peer_id`
     pub async fn send_to_id(&self, buf: &[u8], peer_id: &PeerID) -> anyhow::Result<usize> {
         let route = self.route_table.get_route_by_id(peer_id)?;
@@ -256,7 +247,7 @@ impl<PeerID: Hash + Eq, E: Encoder> PipeWriter<PeerID, E> {
     }
 }
 
-impl<D: Decoder, E: Encoder> PipeLine<D, E> {
+impl PipeLine {
     /// Receving buf from the associated PipeLine
     /// `usize` in the `Ok` branch indicates how many bytes are received
     /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
@@ -269,7 +260,7 @@ impl<D: Decoder, E: Encoder> PipeLine<D, E> {
     }
 }
 
-impl<D, E> PipeLine<D, E> {
+impl PipeLine {
     /// The protocol this pipeline is using
     pub fn protocol(&self) -> ConnectProtocol {
         match self {

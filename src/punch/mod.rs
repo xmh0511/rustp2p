@@ -1,6 +1,3 @@
-use parking_lot::Mutex;
-use rand::seq::SliceRandom;
-use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -10,8 +7,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex;
+use rand::seq::SliceRandom;
+use rand::Rng;
+
 use crate::nat::{NatInfo, NatType};
-use crate::pipe::tcp_pipe::{BytesCodec, Encoder, TcpPipeWriter};
+use crate::pipe::tcp_pipe::TcpPipeWriter;
 use crate::pipe::udp_pipe::UdpPipeWriter;
 use crate::pipe::Pipe;
 use crate::route::route_table::RouteTable;
@@ -166,7 +167,7 @@ impl FromStr for PunchModel {
 }
 
 #[derive(Clone)]
-pub struct Puncher<PeerID, E = BytesCodec> {
+pub struct Puncher<PeerID> {
     route_table: RouteTable<PeerID>,
     // 端口顺序
     port_vec: Vec<u16>,
@@ -174,10 +175,10 @@ pub struct Puncher<PeerID, E = BytesCodec> {
     sym_record: Arc<Mutex<HashMap<PeerID, usize>>>,
     count_record: Arc<Mutex<HashMap<PeerID, usize>>>,
     udp_pipe_writer: Option<UdpPipeWriter>,
-    tcp_pipe_writer: Option<TcpPipeWriter<E>>,
+    tcp_pipe_writer: Option<TcpPipeWriter>,
 }
-impl<PeerID, D, E> From<&Pipe<PeerID, D, E>> for Puncher<PeerID, E> {
-    fn from(value: &Pipe<PeerID, D, E>) -> Self {
+impl<PeerID> From<&Pipe<PeerID>> for Puncher<PeerID> {
+    fn from(value: &Pipe<PeerID>) -> Self {
         let writer_ref = value.writer_ref();
         let tcp_pipe_writer = writer_ref.tcp_pipe_writer_ref().map(|v| v.to_owned());
         let udp_pipe_writer = writer_ref.udp_pipe_writer_ref().map(|v| v.to_owned());
@@ -188,12 +189,12 @@ impl<PeerID, D, E> From<&Pipe<PeerID, D, E>> for Puncher<PeerID, E> {
         )
     }
 }
-impl<PeerID, E> Puncher<PeerID, E> {
+impl<PeerID> Puncher<PeerID> {
     pub fn new(
         route_table: RouteTable<PeerID>,
         udp_pipe_writer: Option<UdpPipeWriter>,
-        tcp_pipe_writer: Option<TcpPipeWriter<E>>,
-    ) -> Puncher<PeerID, E> {
+        tcp_pipe_writer: Option<TcpPipeWriter>,
+    ) -> Puncher<PeerID> {
         let mut port_vec: Vec<u16> = (1..=65535).collect();
         let mut rng = rand::thread_rng();
         port_vec.shuffle(&mut rng);
@@ -207,7 +208,7 @@ impl<PeerID, E> Puncher<PeerID, E> {
         }
     }
 }
-impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
+impl<PeerID: Hash + Eq + Clone> Puncher<PeerID> {
     pub fn reset_record(&self, peer_id: &PeerID) {
         self.sym_record.lock().remove(peer_id);
         self.count_record.lock().remove(peer_id);
@@ -300,7 +301,7 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
         Ok(())
     }
     async fn connect_tcp(
-        tcp_pipe_writer: &TcpPipeWriter<E>,
+        tcp_pipe_writer: &TcpPipeWriter,
         buf: &[u8],
         addr: SocketAddr,
         ttl: Option<u32>,

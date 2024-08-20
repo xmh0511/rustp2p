@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 
-use crate::pipe::tcp_pipe::{BytesCodec, Decoder, Encoder};
+use crate::pipe::tcp_pipe::{BytesInitCodec, InitCodec};
 use crate::pipe::udp_pipe::Model;
 use crate::socket::LocalInterface;
 
@@ -10,17 +10,16 @@ pub(crate) const MAX_SYMMETRIC_PIPELINE_NUM: usize = 200;
 pub(crate) const MAX_MAIN_PIPELINE_NUM: usize = 10;
 pub(crate) const ROUTE_IDLE_TIME: Duration = Duration::from_secs(10);
 
-#[derive(Clone)]
-pub struct PipeConfig<D = BytesCodec, E = BytesCodec> {
+pub struct PipeConfig {
     pub first_latency: bool,
     pub multi_pipeline: usize,
     pub route_idle_time: Duration,
     pub udp_pipe_config: Option<UdpPipeConfig>,
-    pub tcp_pipe_config: Option<TcpPipeConfig<D, E>>,
+    pub tcp_pipe_config: Option<TcpPipeConfig>,
     pub enable_extend: bool,
 }
 
-impl<D: Default, E: Default> Default for PipeConfig<D, E> {
+impl Default for PipeConfig {
     fn default() -> Self {
         Self {
             first_latency: false,
@@ -36,10 +35,10 @@ impl<D: Default, E: Default> Default for PipeConfig<D, E> {
 pub(crate) const MULTI_PIPELINE: usize = 2;
 pub(crate) const UDP_SUB_PIPELINE_NUM: usize = 82;
 
-impl<D: Decoder, E: Encoder> PipeConfig<D, E> {
-    pub fn new(tcp_decoder: D, tcp_encoder: E) -> PipeConfig<D, E> {
+impl PipeConfig {
+    pub fn new(tcp_init_codec: Box<dyn InitCodec>) -> PipeConfig {
         let udp_pipe_config = Some(UdpPipeConfig::default());
-        let tcp_pipe_config = Some(TcpPipeConfig::new(tcp_decoder, tcp_encoder));
+        let tcp_pipe_config = Some(TcpPipeConfig::new(tcp_init_codec));
         Self {
             first_latency: false,
             multi_pipeline: MULTI_PIPELINE,
@@ -50,8 +49,12 @@ impl<D: Decoder, E: Encoder> PipeConfig<D, E> {
         }
     }
 }
-
-impl<D, E> PipeConfig<D, E> {
+impl PipeConfig {
+    pub fn none_tcp(self) -> Self {
+        self
+    }
+}
+impl PipeConfig {
     pub fn empty() -> Self {
         Self {
             first_latency: false,
@@ -78,7 +81,7 @@ impl<D, E> PipeConfig<D, E> {
         self.udp_pipe_config.replace(udp_pipe_config);
         self
     }
-    pub fn set_tcp_pipe_config(mut self, tcp_pipe_config: TcpPipeConfig<D, E>) -> Self {
+    pub fn set_tcp_pipe_config(mut self, tcp_pipe_config: TcpPipeConfig) -> Self {
         self.tcp_pipe_config.replace(tcp_pipe_config);
         self
     }
@@ -93,18 +96,16 @@ impl<D, E> PipeConfig<D, E> {
     }
 }
 
-#[derive(Clone)]
-pub struct TcpPipeConfig<D = BytesCodec, E = BytesCodec> {
+pub struct TcpPipeConfig {
     pub route_idle_time: Duration,
     pub tcp_multiplexing_limit: usize,
     pub default_interface: Option<LocalInterface>,
     pub tcp_port: u16,
     pub use_v6: bool,
-    pub decoder: D,
-    pub encoder: E,
+    pub init_codec: Box<dyn InitCodec>,
 }
 
-impl<D: Default, E: Default> Default for TcpPipeConfig<D, E> {
+impl Default for TcpPipeConfig {
     fn default() -> Self {
         Self {
             route_idle_time: ROUTE_IDLE_TIME,
@@ -112,22 +113,20 @@ impl<D: Default, E: Default> Default for TcpPipeConfig<D, E> {
             default_interface: None,
             tcp_port: 0,
             use_v6: true,
-            decoder: D::default(),
-            encoder: E::default(),
+            init_codec: Box::new(BytesInitCodec),
         }
     }
 }
 
-impl<D, E> TcpPipeConfig<D, E> {
-    pub fn new(decoder: D, encoder: E) -> TcpPipeConfig<D, E> {
+impl TcpPipeConfig {
+    pub fn new(init_codec: Box<dyn InitCodec>) -> TcpPipeConfig {
         Self {
             route_idle_time: ROUTE_IDLE_TIME,
             tcp_multiplexing_limit: MULTI_PIPELINE,
             default_interface: None,
             tcp_port: 0,
             use_v6: true,
-            decoder,
-            encoder,
+            init_codec,
         }
     }
     pub fn check(&self) -> anyhow::Result<()> {

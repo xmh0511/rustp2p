@@ -17,18 +17,18 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 
-pub struct TcpPipe<D, E> {
+pub struct TcpPipe {
     route_idle_time: Duration,
     tcp_listener: TcpListener,
-    connect_receiver: Receiver<(RouteKey, OwnedReadHalf, WriteHalfBox<E>)>,
-    tcp_pipe_writer: TcpPipeWriter<E>,
-    write_half_collect: Arc<WriteHalfCollect<E>>,
-    decoder: D,
+    connect_receiver: Receiver<(RouteKey, ReadHalfBox, WriteHalfBox)>,
+    tcp_pipe_writer: TcpPipeWriter,
+    write_half_collect: Arc<WriteHalfCollect>,
+    init_codec: Arc<Box<dyn InitCodec>>,
 }
 
-impl<D, E> TcpPipe<D, E> {
+impl TcpPipe {
     /// Construct a `TCP` pipe with the specified configuration
-    pub fn new(config: TcpPipeConfig<D, E>) -> anyhow::Result<TcpPipe<D, E>> {
+    pub fn new(config: TcpPipeConfig) -> anyhow::Result<TcpPipe> {
         config.check()?;
         let address: SocketAddr = if config.use_v6 {
             format!("[::]:{}", config.tcp_port).parse().unwrap()
@@ -41,6 +41,7 @@ impl<D, E> TcpPipe<D, E> {
         let tcp_listener = TcpListener::from_std(tcp_listener)?;
         let (connect_sender, connect_receiver) = tokio::sync::mpsc::channel(64);
         let write_half_collect = Arc::new(WriteHalfCollect::new(config.tcp_multiplexing_limit));
+        let init_codec = Arc::new(config.init_codec);
         let tcp_pipe_writer = TcpPipeWriter {
             socket_layer: Arc::new(SocketLayer::new(
                 local_addr,
@@ -48,7 +49,7 @@ impl<D, E> TcpPipe<D, E> {
                 write_half_collect.clone(),
                 connect_sender,
                 config.default_interface,
-                config.encoder,
+                init_codec.clone(),
             )),
         };
         Ok(TcpPipe {
@@ -57,58 +58,61 @@ impl<D, E> TcpPipe<D, E> {
             connect_receiver,
             tcp_pipe_writer,
             write_half_collect,
-            decoder: config.decoder,
+            init_codec,
         })
     }
     #[inline]
-    pub fn writer_ref(&self) -> TcpPipeWriterRef<'_, E> {
+    pub fn writer_ref(&self) -> TcpPipeWriterRef<'_> {
         TcpPipeWriterRef {
             shadow: &self.tcp_pipe_writer,
         }
     }
 }
 
-impl<D: Decoder, E: Encoder> TcpPipe<D, E> {
+impl TcpPipe {
     /// Accept `TCP` pipelines from this kind pipe
-    pub async fn accept(&mut self) -> anyhow::Result<TcpPipeLine<D, E>> {
+    pub async fn accept(&mut self) -> anyhow::Result<TcpPipeLine> {
         tokio::select! {
             rs=self.connect_receiver.recv()=>{
                 let (route_key,read_half,write_half) = rs.context("connect_receiver done")?;
-                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()))
+                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone()))
             }
             rs=self.tcp_listener.accept()=>{
-                let (tcp_stream,_addr) = rs?;
+                let (tcp_stream,addr) = rs?;
                 let route_key = tcp_stream.route_key()?;
                 let (read_half,write_half) = tcp_stream.into_split();
-                let write_half = WriteHalfBox::new(write_half,self.tcp_pipe_writer.encoder.clone());
+                let (decoder,encoder) = self.init_codec.codec(addr)?;
+                let write_half = WriteHalfBox::new(write_half,encoder);
+                let read_half = ReadHalfBox::new(read_half,decoder);
                 self.write_half_collect.add_write_half(route_key,0, write_half.clone());
-                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone(),self.decoder.clone()))
+                Ok(TcpPipeLine::new(self.route_idle_time,route_key,read_half,write_half,self.write_half_collect.clone()))
             }
         }
     }
 }
 
-pub struct TcpPipeLine<D, E> {
+pub struct TcpPipeLine {
     route_idle_time: Duration,
     tcp_read: OwnedReadHalf,
-    tcp_write: WriteHalfBox<E>,
-    stream_owned: StreamOwned<E>,
-    decoder: D,
+    tcp_write: WriteHalfBox,
+    stream_owned: StreamOwned,
+    decoder: Box<dyn Decoder>,
 }
 
-impl<D, E> TcpPipeLine<D, E> {
+impl TcpPipeLine {
     pub(crate) fn new(
         route_idle_time: Duration,
         route_key: RouteKey,
-        tcp_read: OwnedReadHalf,
-        tcp_write: WriteHalfBox<E>,
-        write_half_collect: Arc<WriteHalfCollect<E>>,
-        decoder: D,
+        read: ReadHalfBox,
+        tcp_write: WriteHalfBox,
+        write_half_collect: Arc<WriteHalfCollect>,
     ) -> Self {
         let stream_owned = StreamOwned {
             route_key,
             write_half_collect,
         };
+        let decoder = read.decoder;
+        let tcp_read = read.read_half;
         Self {
             route_idle_time,
             tcp_read,
@@ -134,7 +138,7 @@ impl<D, E> TcpPipeLine<D, E> {
         Ok(())
     }
 }
-impl<D, E> TcpPipeLine<D, E> {
+impl TcpPipeLine {
     pub async fn into_raw(self) -> anyhow::Result<(OwnedWriteHalf, OwnedReadHalf)> {
         let option = self.tcp_write.lock().await.take();
         if let Some((write_half, _)) = option {
@@ -144,7 +148,7 @@ impl<D, E> TcpPipeLine<D, E> {
         }
     }
 }
-impl<D: Decoder, E: Encoder> TcpPipeLine<D, E> {
+impl TcpPipeLine {
     /// Writing `buf` to the target denoted by `route_key` via this pipeline
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         if &self.stream_owned.route_key != route_key {
@@ -178,24 +182,24 @@ impl<D: Decoder, E: Encoder> TcpPipeLine<D, E> {
         Ok((len, self.route_key()))
     }
 }
-struct StreamOwned<E> {
+struct StreamOwned {
     route_key: RouteKey,
-    write_half_collect: Arc<WriteHalfCollect<E>>,
+    write_half_collect: Arc<WriteHalfCollect>,
 }
 
-impl<E> Drop for StreamOwned<E> {
+impl Drop for StreamOwned {
     fn drop(&mut self) {
         self.write_half_collect.remove(&self.route_key);
     }
 }
 
-pub struct WriteHalfCollect<E> {
+pub struct WriteHalfCollect {
     tcp_multiplexing_limit: usize,
     addr_mapping: DashMap<SocketAddr, Vec<usize>>,
-    write_half_map: DashMap<usize, WriteHalfBox<E>>,
+    write_half_map: DashMap<usize, WriteHalfBox>,
 }
 
-impl<E> WriteHalfCollect<E> {
+impl WriteHalfCollect {
     fn new(tcp_multiplexing_limit: usize) -> Self {
         Self {
             tcp_multiplexing_limit,
@@ -204,41 +208,43 @@ impl<E> WriteHalfCollect<E> {
         }
     }
 }
-
-pub(crate) struct WriteHalfBox<E> {
-    write_half: Arc<Mutex<Option<(OwnedWriteHalf, E)>>>,
+pub(crate) struct ReadHalfBox {
+    read_half: OwnedReadHalf,
+    decoder: Box<dyn Decoder>,
+}
+impl ReadHalfBox {
+    pub(crate) fn new(read_half: OwnedReadHalf, decoder: Box<dyn Decoder>) -> Self {
+        Self { read_half, decoder }
+    }
+}
+type W = Mutex<Option<(OwnedWriteHalf, Box<dyn Encoder>)>>;
+#[derive(Clone)]
+pub(crate) struct WriteHalfBox {
+    write_half: Arc<W>,
 }
 
-impl<E> Deref for WriteHalfBox<E> {
-    type Target = Mutex<Option<(OwnedWriteHalf, E)>>;
+impl Deref for WriteHalfBox {
+    type Target = W;
 
     fn deref(&self) -> &Self::Target {
         &self.write_half
     }
 }
 
-impl<E> Clone for WriteHalfBox<E> {
-    fn clone(&self) -> Self {
-        Self {
-            write_half: self.write_half.clone(),
-        }
-    }
-}
-
-impl<E> WriteHalfBox<E> {
-    pub(crate) fn new(write_half: OwnedWriteHalf, encoder: E) -> WriteHalfBox<E> {
+impl WriteHalfBox {
+    pub(crate) fn new(write_half: OwnedWriteHalf, encoder: Box<dyn Encoder>) -> WriteHalfBox {
         Self {
             write_half: Arc::new(Mutex::new(Some((write_half, encoder)))),
         }
     }
 }
 
-impl<E> WriteHalfCollect<E> {
+impl WriteHalfCollect {
     pub(crate) fn add_write_half(
         &self,
         route_key: RouteKey,
         index: usize,
-        write_half: WriteHalfBox<E>,
+        write_half: WriteHalfBox,
     ) {
         assert!(index < self.tcp_multiplexing_limit);
         let index_usize = route_key.index_usize();
@@ -263,7 +269,7 @@ impl<E> WriteHalfCollect<E> {
         }
         self.write_half_map.remove(&index_usize);
     }
-    pub(crate) fn get(&self, index: &usize) -> Option<WriteHalfBox<E>> {
+    pub(crate) fn get(&self, index: &usize) -> Option<WriteHalfBox> {
         self.write_half_map.get(index).map(|v| v.value().clone())
     }
 
@@ -288,24 +294,24 @@ impl<E> WriteHalfCollect<E> {
     }
 }
 
-pub struct SocketLayer<E> {
+pub struct SocketLayer {
     lock: Mutex<()>,
     local_addr: SocketAddr,
     tcp_multiplexing_limit: usize,
-    write_half_collect: Arc<WriteHalfCollect<E>>,
-    connect_sender: Sender<(RouteKey, OwnedReadHalf, WriteHalfBox<E>)>,
+    write_half_collect: Arc<WriteHalfCollect>,
+    connect_sender: Sender<(RouteKey, ReadHalfBox, WriteHalfBox)>,
     default_interface: Option<LocalInterface>,
-    encoder: E,
+    init_codec: Arc<Box<dyn InitCodec>>,
 }
 
-impl<E> SocketLayer<E> {
+impl SocketLayer {
     pub(crate) fn new(
         local_addr: SocketAddr,
         tcp_multiplexing_limit: usize,
-        write_half_collect: Arc<WriteHalfCollect<E>>,
-        connect_sender: Sender<(RouteKey, OwnedReadHalf, WriteHalfBox<E>)>,
+        write_half_collect: Arc<WriteHalfCollect>,
+        connect_sender: Sender<(RouteKey, ReadHalfBox, WriteHalfBox)>,
         default_interface: Option<LocalInterface>,
-        encoder: E,
+        init_codec: Arc<Box<dyn InitCodec>>,
     ) -> Self {
         Self {
             local_addr,
@@ -314,7 +320,7 @@ impl<E> SocketLayer<E> {
             write_half_collect,
             connect_sender,
             default_interface,
-            encoder,
+            init_codec,
         }
     }
     pub fn local_addr(&self) -> SocketAddr {
@@ -322,7 +328,7 @@ impl<E> SocketLayer<E> {
     }
 }
 
-impl<E: Encoder> SocketLayer<E> {
+impl SocketLayer {
     /// Multiple connections can be initiated to the target address.
     pub async fn multi_connect(&self, addr: SocketAddr, index: usize) -> anyhow::Result<RouteKey> {
         self.multi_connect0(addr, index, None).await
@@ -372,7 +378,9 @@ impl<E: Encoder> SocketLayer<E> {
         let stream = connect_tcp(addr, bind_port, self.default_interface.as_ref(), ttl).await?;
         let route_key = stream.route_key()?;
         let (read_half, write_half) = stream.into_split();
-        let write_half = WriteHalfBox::new(write_half, self.encoder.clone());
+        let (decoder, encoder) = self.init_codec.codec(addr)?;
+        let write_half = WriteHalfBox::new(write_half, encoder);
+        let read_half = ReadHalfBox::new(read_half, decoder);
 
         if let Err(e) = self
             .connect_sender
@@ -387,7 +395,7 @@ impl<E: Encoder> SocketLayer<E> {
     }
 }
 
-impl<E: Encoder> TcpPipeWriter<E> {
+impl TcpPipeWriter {
     pub async fn send_to_addr_multi<A: Into<SocketAddr>>(
         &self,
         buf: &[u8],
@@ -444,7 +452,7 @@ impl<E: Encoder> TcpPipeWriter<E> {
         &self,
         addr: SocketAddr,
         index: usize,
-    ) -> anyhow::Result<TcpPipeWriterIndex<'_, E>> {
+    ) -> anyhow::Result<TcpPipeWriterIndex<'_>> {
         let route_key = self.multi_connect(addr, index).await?;
         let write_half = self
             .write_half_collect
@@ -459,52 +467,52 @@ impl<E: Encoder> TcpPipeWriter<E> {
 }
 
 #[derive(Clone)]
-pub struct TcpPipeWriter<E> {
-    socket_layer: Arc<SocketLayer<E>>,
+pub struct TcpPipeWriter {
+    socket_layer: Arc<SocketLayer>,
 }
 
-impl<E> Deref for TcpPipeWriter<E> {
-    type Target = Arc<SocketLayer<E>>;
+impl Deref for TcpPipeWriter {
+    type Target = Arc<SocketLayer>;
 
     fn deref(&self) -> &Self::Target {
         &self.socket_layer
     }
 }
 
-pub struct TcpPipeWriterRef<'a, E> {
-    shadow: &'a Arc<SocketLayer<E>>,
+pub struct TcpPipeWriterRef<'a> {
+    shadow: &'a Arc<SocketLayer>,
 }
 
-impl<'a, E> Clone for TcpPipeWriterRef<'a, E> {
+impl<'a> Clone for TcpPipeWriterRef<'a> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, E> Copy for TcpPipeWriterRef<'a, E> {}
+impl<'a> Copy for TcpPipeWriterRef<'a> {}
 
-impl<'a, E> TcpPipeWriterRef<'a, E> {
-    pub fn to_owned(&self) -> TcpPipeWriter<E> {
+impl<'a> TcpPipeWriterRef<'a> {
+    pub fn to_owned(&self) -> TcpPipeWriter {
         TcpPipeWriter {
             socket_layer: self.shadow.clone(),
         }
     }
 }
 
-impl<'a, E> Deref for TcpPipeWriterRef<'a, E> {
-    type Target = Arc<SocketLayer<E>>;
+impl<'a> Deref for TcpPipeWriterRef<'a> {
+    type Target = Arc<SocketLayer>;
 
     fn deref(&self) -> &Self::Target {
         self.shadow
     }
 }
 
-pub struct TcpPipeWriterIndex<'a, E: Encoder> {
-    shadow: WriteHalfBox<E>,
+pub struct TcpPipeWriterIndex<'a> {
+    shadow: WriteHalfBox,
     marker: PhantomData<&'a ()>,
 }
 
-impl<'a, E: Encoder> TcpPipeWriterIndex<'a, E> {
+impl<'a> TcpPipeWriterIndex<'a> {
     pub async fn send(&self, buf: &[u8]) -> anyhow::Result<usize> {
         let mut guard = self.shadow.lock().await;
         if let Some((write_half, encoder)) = guard.as_mut() {
@@ -542,11 +550,9 @@ impl TcpStreamIndex for TcpStream {
 }
 
 /// The default byte encoder/decoder; using this is no different from directly using a TCP stream.
-#[derive(Copy, Clone, Default)]
 pub struct BytesCodec;
 
 /// Fixed-length prefix encoder/decoder.
-#[derive(Copy, Clone, Default)]
 pub struct LengthPrefixedCodec;
 
 #[async_trait]
@@ -584,14 +590,28 @@ impl Encoder for LengthPrefixedCodec {
         Ok(data.len())
     }
 }
-
+pub struct BytesInitCodec;
+impl InitCodec for BytesInitCodec {
+    fn codec(&self, _addr: SocketAddr) -> anyhow::Result<(Box<dyn Decoder>, Box<dyn Encoder>)> {
+        Ok((Box::new(BytesCodec), Box::new(BytesCodec)))
+    }
+}
+pub struct LengthPrefixedInitCodec;
+impl InitCodec for LengthPrefixedInitCodec {
+    fn codec(&self, _addr: SocketAddr) -> anyhow::Result<(Box<dyn Decoder>, Box<dyn Encoder>)> {
+        Ok((Box::new(LengthPrefixedCodec), Box::new(LengthPrefixedCodec)))
+    }
+}
+pub trait InitCodec: Send + Sync {
+    fn codec(&self, addr: SocketAddr) -> anyhow::Result<(Box<dyn Decoder>, Box<dyn Encoder>)>;
+}
 #[async_trait]
-pub trait Decoder: Clone {
+pub trait Decoder: Send + Sync {
     async fn decode(&mut self, read: &mut OwnedReadHalf, src: &mut [u8]) -> io::Result<usize>;
 }
 
 #[async_trait]
-pub trait Encoder: Clone + Send + Sync {
+pub trait Encoder: Send + Sync {
     async fn encode(&mut self, write: &mut OwnedWriteHalf, data: &[u8]) -> io::Result<usize>;
 }
 
@@ -599,11 +619,12 @@ pub trait Encoder: Clone + Send + Sync {
 mod tests {
     use async_trait::async_trait;
     use std::io;
+    use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
     use crate::pipe::config::TcpPipeConfig;
-    use crate::pipe::tcp_pipe::{Decoder, Encoder, TcpPipe};
+    use crate::pipe::tcp_pipe::{Decoder, Encoder, InitCodec, TcpPipe};
 
     #[tokio::test]
     pub async fn create_tcp_pipe() {
@@ -614,12 +635,16 @@ mod tests {
 
     #[tokio::test]
     pub async fn create_codec_tcp_pipe() {
-        let config = TcpPipeConfig::<MyCodeC, MyCodeC>::default();
+        let config = TcpPipeConfig::new(Box::new(MyInitCodeC));
         let tcp_pipe = TcpPipe::new(config).unwrap();
         drop(tcp_pipe)
     }
-
-    #[derive(Clone, Default)]
+    struct MyInitCodeC;
+    impl InitCodec for MyInitCodeC {
+        fn codec(&self, _addr: SocketAddr) -> anyhow::Result<(Box<dyn Decoder>, Box<dyn Encoder>)> {
+            Ok((Box::new(MyCodeC), Box::new(MyCodeC)))
+        }
+    }
     struct MyCodeC;
 
     #[async_trait]
