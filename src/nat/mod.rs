@@ -44,6 +44,8 @@ pub struct NatInfo {
     pub local_tcp_port: u16,
     /// The public port of `TCP` service, which works when there is either `nat1` or no `nat` exists
     pub public_tcp_port: u16,
+    /// Both parties' seq in the same round of hole punching need to be the same
+    pub seq: u32,
 }
 impl NatInfo {
     pub fn ipv6_addr(&self) -> Vec<SocketAddr> {

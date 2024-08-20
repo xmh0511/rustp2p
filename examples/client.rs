@@ -12,7 +12,6 @@
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 use std::net::SocketAddr;
-use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -118,7 +117,9 @@ async fn main() {
                         request.put_u32(PUNCH_START_1);
                         request.put_u32(my_id);
                         request.put_u32(peer_id);
-                        let data = serde_json::to_string(nat_info1.lock().deref()).unwrap();
+                        let mut nat_info = nat_info1.lock().clone();
+                        nat_info.seq = rand::random();
+                        let data = serde_json::to_string(&nat_info).unwrap();
                         request.extend_from_slice(data.as_bytes());
                         pipe_writer1
                             .send_to_addr(connect_protocol, &request, server)
@@ -209,16 +210,19 @@ impl ContextHandler {
                     request.put_u32(PUNCH_START_2);
                     request.put_u32(self.my_id);
                     request.put_u32(src_id);
-                    let data = serde_json::to_string(self.nat_info.lock().deref()).unwrap();
+                    let peer_nat_info: NatInfo =
+                        serde_json::from_str(&String::from_utf8(buf[12..len].to_vec()).unwrap())
+                            .unwrap();
+                    log::info!("peer_id={src_id},peer_nat_info={peer_nat_info:?}");
+                    let mut nat_info = self.nat_info.lock().clone();
+                    nat_info.seq = peer_nat_info.seq;
+                    let data = serde_json::to_string(&nat_info).unwrap();
                     request.extend_from_slice(data.as_bytes());
                     self.pipe_writer
                         .send_to(&request, &route_key)
                         .await
                         .unwrap();
-                    let peer_nat_info: NatInfo =
-                        serde_json::from_str(&String::from_utf8(buf[12..len].to_vec()).unwrap())
-                            .unwrap();
-                    log::info!("peer_id={src_id},peer_nat_info={peer_nat_info:?}");
+
                     {
                         let mut request = BytesMut::new();
                         request.put_u32(PUNCH_REQ);
@@ -230,7 +234,7 @@ impl ContextHandler {
                                 .punch(
                                     src_id,
                                     &request,
-                                    PunchInfo::new(PunchModelBoxes::all(), peer_nat_info),
+                                    PunchInfo::new_by_other(PunchModelBoxes::all(), peer_nat_info),
                                 )
                                 .await;
                             log::info!("punch peer_id={src_id},{rs:?}")
@@ -252,7 +256,7 @@ impl ContextHandler {
                             .punch(
                                 src_id,
                                 &request,
-                                PunchInfo::new(PunchModelBoxes::all(), peer_nat_info),
+                                PunchInfo::new_by_oneself(PunchModelBoxes::all(), peer_nat_info),
                             )
                             .await;
                         log::info!("punch peer_id={src_id},{rs:?}")
@@ -334,6 +338,7 @@ async fn my_nat_info(pipe_writer: &PipeWriter<u32, LengthPrefixedCodec>) -> Arc<
         local_udp_ports,
         local_tcp_port,
         public_tcp_port: 0,
+        seq: 0,
     };
     Arc::new(Mutex::new(nat_info))
 }

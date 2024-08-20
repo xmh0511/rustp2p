@@ -1,7 +1,7 @@
 use crate::error::RecvError;
 use crate::pipe::config::TcpPipeConfig;
 use crate::route::{Index, RouteKey};
-use crate::socket::{create_tcp0, create_tcp_listener, LocalInterface};
+use crate::socket::{connect_tcp, create_tcp_listener, LocalInterface};
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -325,6 +325,14 @@ impl<E> SocketLayer<E> {
 impl<E: Encoder> SocketLayer<E> {
     /// Multiple connections can be initiated to the target address.
     pub async fn multi_connect(&self, addr: SocketAddr, index: usize) -> anyhow::Result<RouteKey> {
+        self.multi_connect0(addr, index, None).await
+    }
+    pub(crate) async fn multi_connect0(
+        &self,
+        addr: SocketAddr,
+        index: usize,
+        ttl: Option<u32>,
+    ) -> anyhow::Result<RouteKey> {
         if index >= self.tcp_multiplexing_limit {
             return Err(anyhow!(
                 "index[{}] cannot exceed tcp_multiplexing_limit[{}]",
@@ -336,7 +344,7 @@ impl<E: Encoder> SocketLayer<E> {
         if let Some(route_key) = self.write_half_collect.get_limit_route_key(index, &addr) {
             return Ok(route_key);
         }
-        self.connect0(0, addr, index).await
+        self.connect0(0, addr, index, ttl).await
     }
     /// Initiate a connection.
     pub async fn connect(&self, addr: SocketAddr) -> anyhow::Result<RouteKey> {
@@ -344,7 +352,7 @@ impl<E: Encoder> SocketLayer<E> {
         if let Some(route_key) = self.write_half_collect.get_one_route_key(&addr) {
             return Ok(route_key);
         }
-        self.connect0(0, addr, 0).await
+        self.connect0(0, addr, 0, None).await
     }
     /// Reuse the bound port to initiate a connection, which can be used to penetrate NAT1 network type.
     pub async fn connect_reuse_port(&self, addr: SocketAddr) -> anyhow::Result<RouteKey> {
@@ -352,16 +360,16 @@ impl<E: Encoder> SocketLayer<E> {
         if let Some(route_key) = self.write_half_collect.get_one_route_key(&addr) {
             return Ok(route_key);
         }
-        self.connect0(self.local_addr.port(), addr, 0).await
+        self.connect0(self.local_addr.port(), addr, 0, None).await
     }
     async fn connect0(
         &self,
         bind_port: u16,
         addr: SocketAddr,
         index: usize,
+        ttl: Option<u32>,
     ) -> anyhow::Result<RouteKey> {
-        let socket = create_tcp0(addr.is_ipv4(), bind_port, self.default_interface.as_ref())?;
-        let stream = socket.connect(addr).await?;
+        let stream = connect_tcp(addr, bind_port, self.default_interface.as_ref(), ttl).await?;
         let route_key = stream.route_key()?;
         let (read_half, write_half) = stream.into_split();
         let write_half = WriteHalfBox::new(write_half, self.encoder.clone());
@@ -385,7 +393,15 @@ impl<E: Encoder> TcpPipeWriter<E> {
         buf: &[u8],
         addr: A,
     ) -> anyhow::Result<usize> {
-        let route_key = self.multi_connect(addr.into(), 0).await?;
+        self.send_to_addr_multi0(buf, addr, None).await
+    }
+    pub(crate) async fn send_to_addr_multi0<A: Into<SocketAddr>>(
+        &self,
+        buf: &[u8],
+        addr: A,
+        ttl: Option<u32>,
+    ) -> anyhow::Result<usize> {
+        let route_key = self.multi_connect0(addr.into(), 0, ttl).await?;
         self.send_to(buf, &route_key).await
     }
     /// Reuse the bound port to initiate a connection, which can be used to penetrate NAT1 network type.

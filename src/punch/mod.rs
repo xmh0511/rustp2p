@@ -112,16 +112,39 @@ impl PunchModelBoxes {
 
 #[derive(Clone, Debug)]
 pub struct PunchInfo {
+    initiate_by_oneself: bool,
     punch_model: PunchModelBoxes,
     peer_nat_info: NatInfo,
 }
 
 impl PunchInfo {
-    pub fn new(punch_model: PunchModelBoxes, peer_nat_info: NatInfo) -> Self {
+    pub fn new(
+        initiate_by_oneself: bool,
+        punch_model: PunchModelBoxes,
+        peer_nat_info: NatInfo,
+    ) -> Self {
         Self {
+            initiate_by_oneself,
             punch_model,
             peer_nat_info,
         }
+    }
+    pub fn new_by_oneself(punch_model: PunchModelBoxes, peer_nat_info: NatInfo) -> Self {
+        Self {
+            initiate_by_oneself: true,
+            punch_model,
+            peer_nat_info,
+        }
+    }
+    pub fn new_by_other(punch_model: PunchModelBoxes, peer_nat_info: NatInfo) -> Self {
+        Self {
+            initiate_by_oneself: false,
+            punch_model,
+            peer_nat_info,
+        }
+    }
+    pub(crate) fn use_ttl(&self) -> bool {
+        self.initiate_by_oneself ^ (self.peer_nat_info.seq % 2 == 0)
     }
 }
 
@@ -235,31 +258,37 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
             .get(&peer_id)
             .cloned()
             .unwrap_or_default();
+        let ttl = if punch_info.use_ttl() && count < 255 {
+            Some(count.max(3) as u32)
+        } else {
+            None
+        };
         let peer_nat_info = punch_info.peer_nat_info;
         let punch_model = punch_info.punch_model;
+
         async_scoped::TokioScope::scope_and_block(|s| {
             if let Some(tcp_pipe_writer) = self.tcp_pipe_writer.as_ref() {
                 for addr in &peer_nat_info.mapping_tcp_addr {
                     s.spawn(async move {
-                        Self::connect_tcp(tcp_pipe_writer, buf, *addr).await;
+                        Self::connect_tcp(tcp_pipe_writer, buf, *addr, ttl).await;
                     })
                 }
                 if punch_model.is_match(PunchModel::IPv4Tcp) {
                     if let Some(addr) = peer_nat_info.local_ipv4_tcp() {
                         s.spawn(async move {
-                            Self::connect_tcp(tcp_pipe_writer, buf, addr).await;
+                            Self::connect_tcp(tcp_pipe_writer, buf, addr, ttl).await;
                         })
                     }
                     for addr in peer_nat_info.public_ipv4_tcp() {
                         s.spawn(async move {
-                            Self::connect_tcp(tcp_pipe_writer, buf, addr).await;
+                            Self::connect_tcp(tcp_pipe_writer, buf, addr, ttl).await;
                         })
                     }
                 }
                 if punch_model.is_match(PunchModel::IPv6Tcp) {
                     if let Some(addr) = peer_nat_info.ipv6_tcp_addr() {
                         s.spawn(async move {
-                            Self::connect_tcp(tcp_pipe_writer, buf, addr).await;
+                            Self::connect_tcp(tcp_pipe_writer, buf, addr, ttl).await;
                         })
                     }
                 }
@@ -270,10 +299,15 @@ impl<PeerID: Hash + Eq + Clone, E: Encoder> Puncher<PeerID, E> {
 
         Ok(())
     }
-    async fn connect_tcp(tcp_pipe_writer: &TcpPipeWriter<E>, buf: &[u8], addr: SocketAddr) {
+    async fn connect_tcp(
+        tcp_pipe_writer: &TcpPipeWriter<E>,
+        buf: &[u8],
+        addr: SocketAddr,
+        ttl: Option<u32>,
+    ) {
         match tokio::time::timeout(
             Duration::from_secs(3),
-            tcp_pipe_writer.send_to_addr_multi(buf, addr),
+            tcp_pipe_writer.send_to_addr_multi0(buf, addr, ttl),
         )
         .await
         {
