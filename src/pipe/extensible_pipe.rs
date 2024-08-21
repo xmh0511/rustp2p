@@ -9,7 +9,6 @@ use dashmap::DashMap;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 
-use crate::error::RecvError;
 use crate::route::{Index, RouteKey};
 
 #[async_trait]
@@ -116,9 +115,11 @@ impl ExtensiblePipeLine {
     pub fn route_key(&self) -> RouteKey {
         self.line_owned.route_key
     }
-    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
-        let len = self.r.read(buf).await?;
-        Ok((len, self.route_key()))
+    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Option<io::Result<(usize, RouteKey)>> {
+        match self.r.read(buf).await {
+            Ok(len) => Some(Ok((len, self.route_key()))),
+            Err(e) => Some(Err(e)),
+        }
     }
     pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         if &self.line_owned.route_key != route_key {

@@ -55,11 +55,14 @@ async fn main() {
 }
 async fn handler(route_table: RouteTable<u32>, mut line: PipeLine, writer: PipeWriter<u32>) {
     let mut buf = [0; 65536];
-    loop {
-        let (len, route_key) = match line.recv_from(&mut buf).await {
+    while let Some(rs) = line.recv_from(&mut buf).await {
+        let (len, route_key) = match rs {
             Ok(rs) => rs,
             Err(e) => {
-                log::error!("end {e:?}");
+                log::error!("err {e:?}");
+                if line.protocol().is_udp() {
+                    continue;
+                }
                 break;
             }
         };

@@ -1,4 +1,3 @@
-use crate::error::RecvError;
 use crate::pipe::config::TcpPipeConfig;
 use crate::route::{Index, RouteKey};
 use crate::socket::{connect_tcp, create_tcp_listener, LocalInterface};
@@ -177,9 +176,11 @@ impl TcpPipeLine {
     /// Receive bytes from this pipeline, which the configured Decoder pre-processes
     /// `usize` in the `Ok` branch indicates how many bytes are received
     /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
-    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
-        let len = self.recv(buf).await?;
-        Ok((len, self.route_key()))
+    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Option<io::Result<(usize, RouteKey)>> {
+        match self.recv(buf).await {
+            Ok(len) => Some(Ok((len, self.route_key()))),
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 struct StreamOwned {

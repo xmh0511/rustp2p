@@ -5,7 +5,6 @@ use anyhow::anyhow;
 
 use tcp_pipe::TcpPipeWriterRef;
 
-use crate::error::RecvError;
 use crate::idle::IdleRouteManager;
 use crate::pipe::config::PipeConfig;
 use crate::pipe::extensible_pipe::{
@@ -251,7 +250,10 @@ impl PipeLine {
     /// Receving buf from the associated PipeLine
     /// `usize` in the `Ok` branch indicates how many bytes are received
     /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
-    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
+    pub async fn recv_from(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Option<std::io::Result<(usize, RouteKey)>> {
         match self {
             PipeLine::Udp(line) => line.recv_from(buf).await,
             PipeLine::Tcp(line) => line.recv_from(buf).await,

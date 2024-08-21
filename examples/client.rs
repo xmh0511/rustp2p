@@ -178,11 +178,14 @@ struct ContextHandler {
 impl ContextHandler {
     async fn handle(&self, mut pipe_line: PipeLine) -> anyhow::Result<()> {
         let mut buf = [0; 65536];
-        loop {
-            let (len, route_key) = match pipe_line.recv_from(&mut buf).await {
+        while let Some(rs) = pipe_line.recv_from(&mut buf).await {
+            let (len, route_key) = match rs {
                 Ok(rs) => rs,
                 Err(e) => {
                     log::warn!("{e:?}");
+                    if pipe_line.protocol().is_udp() {
+                        continue;
+                    }
                     break;
                 }
             };

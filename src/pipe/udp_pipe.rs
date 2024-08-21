@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use crate::error::RecvError;
 use crate::pipe::config::UdpPipeConfig;
 use crate::pipe::{DEFAULT_ADDRESS_V4, DEFAULT_ADDRESS_V6};
 use crate::route::{Index, RouteKey};
@@ -542,18 +541,21 @@ impl UdpPipeLine {
     /// Receving buf from this PipeLine
     /// `usize` in the `Ok` branch indicates how many bytes are received
     /// `RouteKey` in the `Ok` branch denotes the source where these bytes are received from
-    pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, RouteKey), RecvError> {
+    pub async fn recv_from(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Option<std::io::Result<(usize, RouteKey)>> {
         let udp = if let Some(udp) = &self.udp {
             udp
         } else {
-            return Err(RecvError::Eof);
+            return None;
         };
         loop {
             if let Some(close_notify) = &mut self.close_notify {
                 tokio::select! {
                     _=close_notify.recv()=>{
                          self.done();
-                         return Err(RecvError::Eof)
+                         return None
                     }
                     result=udp.recv_from(buf)=>{
                          let (len, addr) = match result {
@@ -562,10 +564,10 @@ impl UdpPipeLine {
                                 if should_ignore_error(&e) {
                                     continue;
                                 }
-                                return Err(e)?
+                                return Some(Err(e))
                             }
                          };
-                         return Ok((len, RouteKey::new(self.index, addr)))
+                         return Some(Ok((len, RouteKey::new(self.index, addr))))
                     }
                 }
             } else {
@@ -575,10 +577,10 @@ impl UdpPipeLine {
                         if should_ignore_error(&e) {
                             continue;
                         }
-                        return Err(e)?;
+                        return Some(Err(e));
                     }
                 };
-                return Ok((len, RouteKey::new(self.index, addr)));
+                return Some(Ok((len, RouteKey::new(self.index, addr))));
             }
         }
     }
@@ -651,6 +653,6 @@ mod tests {
     }
     async fn pipe_line_recv(mut udp_pipe_line: UdpPipeLine) -> bool {
         let mut buf = [0; 1400];
-        udp_pipe_line.recv_from(&mut buf).await.is_err()
+        udp_pipe_line.recv_from(&mut buf).await.is_none()
     }
 }
