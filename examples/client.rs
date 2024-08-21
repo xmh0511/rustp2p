@@ -317,7 +317,7 @@ async fn my_nat_info(pipe_writer: &PipeWriter<u32>) -> Arc<Mutex<NatInfo>> {
         .await
         .unwrap();
     log::info!("nat_type:{nat_type:?},public_ips:{public_ips:?},port_range={port_range}");
-    let local_ipv4 = rust_p2p::extend::addr::local_ipv4().unwrap();
+    let local_ipv4 = rust_p2p::extend::addr::local_ipv4().await.unwrap();
     let local_udp_ports = pipe_writer
         .udp_pipe_writer()
         .unwrap()

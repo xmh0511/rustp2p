@@ -1,18 +1,21 @@
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use tokio::net::UdpSocket;
 
-pub fn local_ipv4() -> io::Result<Ipv4Addr> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect("8.8.8.8:80")?;
+pub async fn local_ipv4() -> io::Result<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    socket.connect("8.8.8.8:80").await?;
     let addr = socket.local_addr()?;
     match addr.ip() {
         IpAddr::V4(ip) => Ok(ip),
         IpAddr::V6(_) => Ok(Ipv4Addr::UNSPECIFIED),
     }
 }
-pub fn local_ipv6() -> io::Result<Ipv6Addr> {
-    let socket = UdpSocket::bind("[::]:0")?;
-    socket.connect("[2001:4860:4860:0000:0000:0000:0000:8888]:80")?;
+pub async fn local_ipv6() -> io::Result<Ipv6Addr> {
+    let socket = UdpSocket::bind("[::]:0").await?;
+    socket
+        .connect("[2001:4860:4860:0000:0000:0000:0000:8888]:80")
+        .await?;
     let addr = socket.local_addr()?;
     match addr.ip() {
         IpAddr::V4(_) => Ok(Ipv6Addr::UNSPECIFIED),
