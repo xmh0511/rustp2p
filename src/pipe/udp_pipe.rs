@@ -519,13 +519,13 @@ impl UdpPipeLine {
         }
     }
     /// Writing `buf` to the target denoted by `route_key` via this pipeline
-    pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<()> {
+    pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
         if self.index != route_key.index() {
             Err(anyhow!("mismatch"))?
         }
         if let Some(udp) = &self.udp {
-            udp.send_to(buf, route_key.addr()).await?;
-            Ok(())
+            let len = udp.send_to(buf, route_key.addr()).await?;
+            Ok(len)
         } else {
             Err(anyhow!("closed"))
         }

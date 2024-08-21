@@ -260,6 +260,16 @@ impl PipeLine {
             PipeLine::Extend(line) => line.recv_from(buf).await,
         }
     }
+
+    /// Send 'buf' to 'route_key' using the current 'line'.
+    /// If 'route_key' does not belong to the current 'line', an Err will be returned.
+    pub async fn send_to(&self, buf: &[u8], route_key: &RouteKey) -> anyhow::Result<usize> {
+        match self {
+            PipeLine::Udp(line) => line.send_to(buf, route_key).await,
+            PipeLine::Tcp(line) => line.send_to(buf, route_key).await,
+            PipeLine::Extend(line) => line.send_to(buf, route_key).await,
+        }
+    }
 }
 
 impl PipeLine {
