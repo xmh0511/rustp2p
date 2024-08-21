@@ -202,8 +202,6 @@ impl<PeerID> PipeWriter<PeerID> {
                     return w.send_to(buf, route_key).await;
                 }
             }
-            ConnectProtocol::WS => {}
-            ConnectProtocol::WSS => {}
             ConnectProtocol::Extend => {
                 if let Some(w) = self.extensible_pipe_writer.as_ref() {
                     return w.send_to(buf, route_key).await;
@@ -230,8 +228,6 @@ impl<PeerID> PipeWriter<PeerID> {
                     return w.send_to_addr(buf, addr).await;
                 }
             }
-            ConnectProtocol::WS => {}
-            ConnectProtocol::WSS => {}
             ConnectProtocol::Extend => {}
         }
         Err(anyhow!("unimplemented"))

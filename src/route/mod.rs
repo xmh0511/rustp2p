@@ -60,8 +60,6 @@ use crate::pipe::udp_pipe::UDPIndex;
 pub enum Index {
     Udp(UDPIndex),
     Tcp(usize),
-    WS(usize),
-    WSS(usize),
     Extend(usize),
 }
 impl Index {
@@ -69,8 +67,6 @@ impl Index {
         match self {
             Index::Udp(index) => index.index(),
             Index::Tcp(index) => *index,
-            Index::WS(index) => *index,
-            Index::WSS(index) => *index,
             Index::Extend(index) => *index,
         }
     }
@@ -78,8 +74,6 @@ impl Index {
         match self {
             Index::Tcp(_) => ConnectProtocol::TCP,
             Index::Udp(_) => ConnectProtocol::UDP,
-            Index::WS(_) => ConnectProtocol::WS,
-            Index::WSS(_) => ConnectProtocol::WSS,
             Index::Extend(_) => ConnectProtocol::Extend,
         }
     }
@@ -120,8 +114,6 @@ pub struct RouteSortKey {
 pub enum ConnectProtocol {
     UDP,
     TCP,
-    WS,
-    WSS,
     Extend,
 }
 impl ConnectProtocol {
@@ -132,19 +124,5 @@ impl ConnectProtocol {
     #[inline]
     pub fn is_udp(&self) -> bool {
         self == &ConnectProtocol::UDP
-    }
-    #[inline]
-    pub fn is_ws(&self) -> bool {
-        self == &ConnectProtocol::WS
-    }
-    #[inline]
-    pub fn is_wss(&self) -> bool {
-        self == &ConnectProtocol::WSS
-    }
-    pub fn is_transport(&self) -> bool {
-        self.is_tcp() || self.is_udp()
-    }
-    pub fn is_base_tcp(&self) -> bool {
-        self.is_tcp() || self.is_ws() || self.is_wss()
     }
 }

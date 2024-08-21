@@ -132,10 +132,6 @@ impl TcpPipeLine {
         }
         Ok(())
     }
-    pub async fn readable(&self) -> anyhow::Result<()> {
-        self.tcp_read.readable().await?;
-        Ok(())
-    }
 }
 impl TcpPipeLine {
     pub async fn into_raw(self) -> anyhow::Result<(OwnedWriteHalf, OwnedReadHalf)> {
